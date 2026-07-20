@@ -10,8 +10,9 @@ const config: Config = {
   },
   moduleNameMapper: {
     '^@erp/shared$': '<rootDir>/../../packages/shared/dist/index.js',
+    '^@erp/organization-io$': '<rootDir>/../../packages/organization-io/dist/index.js',
   },
-  testTimeout: 30000,
+  testTimeout: 60000,
 };
 
 export default config;

@@ -1,13 +1,50 @@
 import {
+  IsArray,
+  IsEmail,
   IsEnum,
-  IsInt,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
-  Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { EntityStatus } from '@erp/shared';
+
+export class OrganizationMemberDto {
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  position!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  memberName!: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  additionalInfo?: string;
+}
+
+export class CompanyMemberDto extends OrganizationMemberDto {
+  @IsOptional()
+  @IsUUID()
+  linkedProfileUserId?: string | null;
+}
+
+export class UnitMemberDto extends CompanyMemberDto {}
 
 export class UpdateOrganizationDto {
   @IsOptional()
@@ -17,11 +54,21 @@ export class UpdateOrganizationDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
+  representativeName?: string;
 
   @IsOptional()
-  @IsEnum(EntityStatus)
-  status?: EntityStatus;
+  @IsUUID()
+  linkedProfileUserId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  additionalInfo?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrganizationMemberDto)
+  members?: OrganizationMemberDto[];
 }
 
 export class CreateCompanyDto {
@@ -31,28 +78,37 @@ export class CreateCompanyDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
+  taxId?: string;
 
   @IsOptional()
   @IsString()
-  managerName?: string;
+  address?: string;
 
   @IsOptional()
   @IsString()
-  managerEmployeeCode?: string;
+  representativeName?: string;
 
   @IsOptional()
   @IsUUID()
-  managerUserId?: string;
+  linkedProfileUserId?: string;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  displayOrder?: number;
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @IsOptional()
   @IsEnum(EntityStatus)
   status?: EntityStatus;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CompanyMemberDto)
+  members?: CompanyMemberDto[];
 }
 
 export class UpdateCompanyDto {
@@ -63,28 +119,37 @@ export class UpdateCompanyDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
+  taxId?: string;
 
   @IsOptional()
   @IsString()
-  managerName?: string;
+  address?: string;
 
   @IsOptional()
   @IsString()
-  managerEmployeeCode?: string;
+  representativeName?: string;
 
   @IsOptional()
   @IsUUID()
-  managerUserId?: string | null;
+  linkedProfileUserId?: string | null;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  displayOrder?: number;
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @IsOptional()
   @IsEnum(EntityStatus)
   status?: EntityStatus;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CompanyMemberDto)
+  members?: CompanyMemberDto[];
 }
 
 export class CreateOrganizationUnitDto {
@@ -101,28 +166,19 @@ export class CreateOrganizationUnitDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
-
-  @IsOptional()
-  @IsString()
   managerName?: string;
 
   @IsOptional()
-  @IsString()
-  managerEmployeeCode?: string;
-
-  @IsOptional()
   @IsUUID()
-  managerUserId?: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  displayOrder?: number;
+  linkedProfileUserId?: string;
 
   @IsOptional()
   @IsEnum(EntityStatus)
   status?: EntityStatus;
+
+  @IsOptional()
+  @IsString()
+  additionalInfo?: string;
 }
 
 export class UpdateOrganizationUnitDto {
@@ -133,37 +189,45 @@ export class UpdateOrganizationUnitDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
-
-  @IsOptional()
-  @IsString()
   managerName?: string;
 
   @IsOptional()
-  @IsString()
-  managerEmployeeCode?: string;
-
-  @IsOptional()
   @IsUUID()
-  managerUserId?: string | null;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  displayOrder?: number;
+  linkedProfileUserId?: string | null;
 
   @IsOptional()
   @IsEnum(EntityStatus)
   status?: EntityStatus;
+
+  @IsOptional()
+  @IsString()
+  additionalInfo?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UnitMemberDto)
+  members?: UnitMemberDto[];
 }
 
-export class MoveOrganizationUnitDto {
-  @IsOptional()
-  @IsUUID()
-  parentUnitId?: string | null;
+export class ReorderNodeDto {
+  @IsIn(['up', 'down'])
+  direction!: 'up' | 'down';
+}
 
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  displayOrder?: number;
+export class ApplyOrganizationImportDto {
+  @IsString()
+  @IsNotEmpty()
+  snapshotPath!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplySelectionDto)
+  selections!: ApplySelectionDto[];
+}
+
+export class ApplySelectionDto {
+  @IsString()
+  @IsNotEmpty()
+  selectionKey!: string;
 }

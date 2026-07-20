@@ -1,7 +1,15 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Queue } from 'bullmq';
+import { Queue, Job } from 'bullmq';
 import Redis from 'ioredis';
+import {
+  ORG_IO_JOB_APPLY,
+  ORG_IO_JOB_DIFF,
+  ORG_IO_JOB_EXPORT,
+  ORG_IO_QUEUE_NAME,
+  type ApplySelection,
+  type OrganizationIoJobResult,
+} from '@erp/organization-io';
 
 export const DEMO_QUEUE_NAME = 'erp-demo';
 
@@ -9,6 +17,7 @@ export const DEMO_QUEUE_NAME = 'erp-demo';
 export class QueueService implements OnModuleDestroy {
   private connection: Redis;
   private demoQueue: Queue;
+  private orgIoQueue: Queue;
 
   constructor(config: ConfigService) {
     this.connection = new Redis({
@@ -18,6 +27,9 @@ export class QueueService implements OnModuleDestroy {
     });
 
     this.demoQueue = new Queue(DEMO_QUEUE_NAME, {
+      connection: this.connection,
+    });
+    this.orgIoQueue = new Queue(ORG_IO_QUEUE_NAME, {
       connection: this.connection,
     });
   }
@@ -39,8 +51,55 @@ export class QueueService implements OnModuleDestroy {
     };
   }
 
+  async enqueueOrganizationExport() {
+    const job = await this.orgIoQueue.add(
+      ORG_IO_JOB_EXPORT,
+      { enqueuedAt: new Date().toISOString() },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { jobId: job.id, queue: ORG_IO_QUEUE_NAME, status: 'queued' as const };
+  }
+
+  async enqueueOrganizationDiff(filePath: string, originalName: string) {
+    const job = await this.orgIoQueue.add(
+      ORG_IO_JOB_DIFF,
+      { filePath, originalName, enqueuedAt: new Date().toISOString() },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { jobId: job.id, queue: ORG_IO_QUEUE_NAME, status: 'queued' as const };
+  }
+
+  async enqueueOrganizationApply(snapshotPath: string, selections: ApplySelection[]) {
+    const job = await this.orgIoQueue.add(
+      ORG_IO_JOB_APPLY,
+      { snapshotPath, selections, enqueuedAt: new Date().toISOString() },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { jobId: job.id, queue: ORG_IO_QUEUE_NAME, status: 'queued' as const };
+  }
+
+  async getOrganizationIoJob(jobId: string) {
+    const job = await this.orgIoQueue.getJob(jobId);
+    if (!job) return null;
+    return this.mapJob(job);
+  }
+
+  private async mapJob(job: Job) {
+    const state = await job.getState();
+    const result = job.returnvalue as OrganizationIoJobResult | undefined;
+    return {
+      jobId: job.id,
+      name: job.name,
+      status: state,
+      progress: job.progress,
+      result: result ?? null,
+      failedReason: job.failedReason ?? null,
+    };
+  }
+
   async onModuleDestroy() {
     await this.demoQueue.close();
+    await this.orgIoQueue.close();
     await this.connection.quit();
   }
 }

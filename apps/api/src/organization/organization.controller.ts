@@ -1,13 +1,30 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { Permissions } from '@erp/shared';
 import { OrganizationService } from './organization.service';
 import { CompaniesService } from './companies.service';
 import { OrganizationUnitsService } from './organization-units.service';
 import { OrganizationTreeService } from './organization-tree.service';
+import { OrganizationIoService } from './organization-io.service';
 import {
+  ApplyOrganizationImportDto,
   CreateCompanyDto,
   CreateOrganizationUnitDto,
-  MoveOrganizationUnitDto,
+  ReorderNodeDto,
   UpdateCompanyDto,
   UpdateOrganizationDto,
   UpdateOrganizationUnitDto,
@@ -22,6 +39,7 @@ export class OrganizationController {
     private companiesService: CompaniesService,
     private unitsService: OrganizationUnitsService,
     private treeService: OrganizationTreeService,
+    private organizationIoService: OrganizationIoService,
   ) {}
 
   @Get()
@@ -42,6 +60,42 @@ export class OrganizationController {
     return this.treeService.getTree(search);
   }
 
+  @Post('export')
+  @RequirePermissions(Permissions.ORGANIZATION_VIEW)
+  exportOrganization() {
+    return this.organizationIoService.enqueueExport();
+  }
+
+  @Post('import/diff')
+  @RequirePermissions(Permissions.ORGANIZATION_MANAGE)
+  @UseInterceptors(FileInterceptor('file'))
+  importDiff(@UploadedFile() file: Express.Multer.File) {
+    return this.organizationIoService.enqueueDiff(file);
+  }
+
+  @Post('import/apply')
+  @RequirePermissions(Permissions.ORGANIZATION_MANAGE)
+  importApply(@Body() dto: ApplyOrganizationImportDto) {
+    return this.organizationIoService.enqueueApply(dto.snapshotPath, dto.selections);
+  }
+
+  @Get('io/jobs/:jobId')
+  @RequirePermissions(Permissions.ORGANIZATION_VIEW)
+  getIoJob(@Param('jobId') jobId: string) {
+    return this.organizationIoService.getJob(jobId);
+  }
+
+  @Get('io/jobs/:jobId/download')
+  @RequirePermissions(Permissions.ORGANIZATION_VIEW)
+  async downloadExport(@Param('jobId') jobId: string, @Res({ passthrough: true }) res: Response) {
+    const { file, fileName } = await this.organizationIoService.downloadExport(jobId);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    });
+    return file;
+  }
+
   @Post('companies')
   @RequirePermissions(Permissions.COMPANY_CREATE)
   createCompany(@Body() dto: CreateCompanyDto) {
@@ -52,6 +106,12 @@ export class OrganizationController {
   @RequirePermissions(Permissions.COMPANY_UPDATE)
   updateCompany(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
     return this.companiesService.update(id, dto);
+  }
+
+  @Patch('companies/:id/reorder')
+  @RequirePermissions(Permissions.ORG_UNIT_MOVE)
+  reorderCompany(@Param('id') id: string, @Body() dto: ReorderNodeDto) {
+    return this.companiesService.reorder(id, dto.direction);
   }
 
   @Delete('companies/:id')
@@ -72,10 +132,10 @@ export class OrganizationController {
     return this.unitsService.update(id, dto);
   }
 
-  @Patch('units/:id/move')
+  @Patch('units/:id/reorder')
   @RequirePermissions(Permissions.ORG_UNIT_MOVE)
-  moveUnit(@Param('id') id: string, @Body() dto: MoveOrganizationUnitDto) {
-    return this.unitsService.move(id, dto);
+  reorderUnit(@Param('id') id: string, @Body() dto: ReorderNodeDto) {
+    return this.unitsService.reorder(id, dto.direction);
   }
 
   @Delete('units/:id')

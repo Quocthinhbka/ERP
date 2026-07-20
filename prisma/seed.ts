@@ -284,16 +284,25 @@ async function main() {
     data: { userId: adminUser.id, roleId: superAdminRole.id },
   });
 
-  await prisma.organization.upsert({
-    where: { code: 'ORG' },
-    update: { name: 'Tổ chức HyperLabs', status: 'ACTIVE' },
-    create: {
-      code: 'ORG',
-      name: 'Tổ chức HyperLabs',
-      description: 'Tổ chức mặc định',
-      status: 'ACTIVE',
-    },
-  });
+  const existingOrg = await prisma.organization.findFirst();
+  if (existingOrg) {
+    await prisma.organization.update({
+      where: { id: existingOrg.id },
+      data: {
+        name: 'Tổ chức HyperLabs',
+        representativeName: 'System Administrator',
+        additionalInfo: 'Tổ chức mặc định',
+      },
+    });
+  } else {
+    await prisma.organization.create({
+      data: {
+        name: 'Tổ chức HyperLabs',
+        representativeName: 'System Administrator',
+        additionalInfo: 'Tổ chức mặc định',
+      },
+    });
+  }
 
   console.log('Seed completed: permissions, roles, admin user, organization.');
 }

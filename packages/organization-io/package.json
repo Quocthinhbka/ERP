@@ -1,25 +1,25 @@
 {
-  "name": "@erp/worker",
+  "name": "@erp/organization-io",
   "version": "0.1.0",
   "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/main.ts",
-    "start": "node dist/main.js",
     "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
-    "@erp/organization-io": "workspace:^",
     "@erp/shared": "workspace:*",
-    "@prisma/adapter-pg": "^7.0.0",
     "@prisma/client": "^7.0.0",
-    "bullmq": "^5.0.0",
-    "dotenv": "^16.4.0",
-    "ioredis": "^5.4.0",
-    "pg": "^8.13.0"
+    "exceljs": "^4.4.0"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.0"
   }

@@ -12,17 +12,20 @@ enum EntityStatus {
 }
 
 model User {
-  id                   String             @id @default(uuid())
-  email                String             @unique
-  passwordHash         String             @map("password_hash")
-  fullName             String             @map("full_name")
-  employeeCode         String?            @unique @map("employee_code")
-  isActive             Boolean            @default(true) @map("is_active")
-  createdAt            DateTime           @default(now()) @map("created_at")
-  updatedAt            DateTime           @updatedAt @map("updated_at")
-  roles                UserRole[]
-  managedCompanies     Company[]          @relation("CompanyManager")
-  managedUnits         OrganizationUnit[] @relation("UnitManager")
+  id                         String                 @id @default(uuid())
+  email                      String                 @unique
+  passwordHash               String                 @map("password_hash")
+  fullName                   String                 @map("full_name")
+  employeeCode               String?                @unique @map("employee_code")
+  isActive                   Boolean                @default(true) @map("is_active")
+  createdAt                  DateTime               @default(now()) @map("created_at")
+  updatedAt                  DateTime               @updatedAt @map("updated_at")
+  roles                      UserRole[]
+  organizationLinkedProfiles Organization[]         @relation("OrgLinkedProfile")
+  companyLinkedProfiles      Company[]              @relation("CompanyLinkedProfile")
+  companyMemberProfiles      CompanyMember[]        @relation("CompanyMemberLinkedProfile")
+  unitLinkedProfiles         OrganizationUnit[]     @relation("UnitLinkedProfile")
+  unitMemberProfiles         OrganizationUnitMember[] @relation("UnitMemberLinkedProfile")
 
   @@map("users")
 }
@@ -77,58 +80,111 @@ model RolePermission {
 }
 
 model Organization {
-  id          String        @id @default(uuid())
-  code        String        @unique @default("ORG")
-  name        String
-  description String?
-  status      EntityStatus  @default(ACTIVE)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-  companies   Company[]
+  id                  String               @id @default(uuid())
+  name                String
+  representativeName  String?              @map("representative_name")
+  linkedProfileUserId String?              @map("linked_profile_user_id")
+  additionalInfo      String?              @map("additional_info")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  companies           Company[]
+  members             OrganizationMember[]
+  linkedProfileUser   User?                @relation("OrgLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
 
   @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  position       String
+  memberName     String       @map("member_name")
+  phone          String?
+  email          String?
+  additionalInfo String?      @map("additional_info")
+  sortOrder      Int          @default(0) @map("sort_order")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("organization_members")
 }
 
 model Company {
   id                  String             @id @default(uuid())
   organizationId      String             @map("organization_id")
-  code                String
   name                String
-  description         String?
-  managerName         String?            @map("manager_name")
-  managerEmployeeCode String?            @map("manager_employee_code")
-  managerUserId       String?            @map("manager_user_id")
-  displayOrder        Int                @default(0) @map("display_order")
+  taxId               String?            @map("tax_id")
+  address             String?
+  representativeName  String?            @map("representative_name")
+  linkedProfileUserId String?            @map("linked_profile_user_id")
+  phone               String?
+  email               String?
   status              EntityStatus       @default(ACTIVE)
+  sortOrder           Int                @default(0) @map("sort_order")
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
   organization        Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  managerUser         User?              @relation("CompanyManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  linkedProfileUser   User?              @relation("CompanyLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
+  members             CompanyMember[]
   units               OrganizationUnit[]
 
-  @@unique([organizationId, code])
   @@map("companies")
+}
+
+model CompanyMember {
+  id                  String   @id @default(uuid())
+  companyId           String   @map("company_id")
+  position            String
+  memberName          String   @map("member_name")
+  linkedProfileUserId String?  @map("linked_profile_user_id")
+  phone               String?
+  email               String?
+  additionalInfo      String?  @map("additional_info")
+  sortOrder           Int      @default(0) @map("sort_order")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  linkedProfileUser   User?    @relation("CompanyMemberLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
+
+  @@map("company_members")
 }
 
 model OrganizationUnit {
   id                  String             @id @default(uuid())
   companyId           String             @map("company_id")
   parentUnitId        String?            @map("parent_unit_id")
-  code                String
   name                String
-  description         String?
   managerName         String?            @map("manager_name")
-  managerEmployeeCode String?            @map("manager_employee_code")
-  managerUserId       String?            @map("manager_user_id")
-  displayOrder        Int                @default(0) @map("display_order")
+  linkedProfileUserId String?            @map("linked_profile_user_id")
   status              EntityStatus       @default(ACTIVE)
+  additionalInfo      String?            @map("additional_info")
+  sortOrder           Int                @default(0) @map("sort_order")
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
   company             Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   parentUnit          OrganizationUnit?  @relation("UnitTree", fields: [parentUnitId], references: [id], onDelete: Cascade)
   childUnits          OrganizationUnit[] @relation("UnitTree")
-  managerUser         User?              @relation("UnitManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  linkedProfileUser   User?              @relation("UnitLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
+  members             OrganizationUnitMember[]
 
-  @@unique([companyId, code])
   @@map("organization_units")
+}
+
+model OrganizationUnitMember {
+  id                  String           @id @default(uuid())
+  unitId              String           @map("unit_id")
+  position            String
+  memberName          String           @map("member_name")
+  linkedProfileUserId String?          @map("linked_profile_user_id")
+  phone               String?
+  email               String?
+  additionalInfo      String?          @map("additional_info")
+  sortOrder           Int              @default(0) @map("sort_order")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  unit                OrganizationUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  linkedProfileUser   User?            @relation("UnitMemberLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
+
+  @@map("organization_unit_members")
 }

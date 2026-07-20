@@ -1,19 +1,27 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { EntityStatus, OrgNodeType, OrgTreeNode } from '@erp/shared';
+import { EntityStatus, OrgMember, OrgNodeType, OrgTreeNode } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 type UnitRow = {
   id: string;
   companyId: string;
   parentUnitId: string | null;
-  code: string;
   name: string;
-  description: string | null;
   managerName: string | null;
-  managerEmployeeCode: string | null;
-  managerUserId: string | null;
-  displayOrder: number;
+  linkedProfileUserId: string | null;
   status: EntityStatus;
+  additionalInfo: string | null;
+  linkedProfileUser: { fullName: string } | null;
+  members: Array<{
+    id: string;
+    position: string;
+    memberName: string;
+    phone: string | null;
+    email: string | null;
+    additionalInfo: string | null;
+    linkedProfileUserId: string | null;
+    linkedProfileUser: { fullName: string } | null;
+  }>;
   _count: { childUnits: number };
 };
 
@@ -24,14 +32,27 @@ export class OrganizationTreeService {
   async getTree(search?: string) {
     const org = await this.prisma.organization.findFirst({
       include: {
+        linkedProfileUser: { select: { fullName: true } },
+        members: { orderBy: { sortOrder: 'asc' } },
         companies: {
-          orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
           include: {
-            units: {
-              orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
-              include: { _count: { select: { childUnits: true } } },
+            linkedProfileUser: { select: { fullName: true } },
+            members: {
+              orderBy: { sortOrder: 'asc' },
+              include: { linkedProfileUser: { select: { fullName: true } } },
             },
-            _count: { select: { units: true } },
+            units: {
+              orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+              include: {
+                linkedProfileUser: { select: { fullName: true } },
+                members: {
+                  orderBy: { sortOrder: 'asc' },
+                  include: { linkedProfileUser: { select: { fullName: true } } },
+                },
+                _count: { select: { childUnits: true } },
+              },
+            },
           },
         },
       },
@@ -47,25 +68,28 @@ export class OrganizationTreeService {
     const orgNode: OrgTreeNode = {
       id: org.id,
       type: OrgNodeType.ORGANIZATION,
-      code: org.code,
       name: org.name,
-      description: org.description,
-      status: org.status as EntityStatus,
-      displayOrder: 0,
+      representativeName: org.representativeName,
+      linkedProfileUserId: org.linkedProfileUserId,
+      linkedProfileName: org.linkedProfileUser?.fullName ?? null,
+      additionalInfo: org.additionalInfo,
+      members: org.members.map((m) => this.mapOrgMember(m)),
       childCount: org.companies.length,
       children: org.companies.map((company) => {
         const unitTree = this.buildUnitTree(company.units as UnitRow[], null);
         const companyNode: OrgTreeNode = {
           id: company.id,
           type: OrgNodeType.COMPANY,
-          code: company.code,
           name: company.name,
-          description: company.description,
+          representativeName: company.representativeName,
+          linkedProfileUserId: company.linkedProfileUserId,
+          linkedProfileName: company.linkedProfileUser?.fullName ?? null,
+          taxId: company.taxId,
+          address: company.address,
+          phone: company.phone,
+          email: company.email,
           status: company.status as EntityStatus,
-          managerName: company.managerName,
-          managerEmployeeCode: company.managerEmployeeCode,
-          managerUserId: company.managerUserId,
-          displayOrder: company.displayOrder,
+          members: company.members.map((m) => this.mapCompanyMember(m)),
           organizationId: org.id,
           childCount: company.units.length,
           children: unitTree,
@@ -91,29 +115,72 @@ export class OrganizationTreeService {
         return {
           id: unit.id,
           type: OrgNodeType.UNIT,
-          code: unit.code,
           name: unit.name,
-          description: unit.description,
-          status: unit.status,
           managerName: unit.managerName,
-          managerEmployeeCode: unit.managerEmployeeCode,
-          managerUserId: unit.managerUserId,
-          displayOrder: unit.displayOrder,
+          linkedProfileUserId: unit.linkedProfileUserId,
+          linkedProfileName: unit.linkedProfileUser?.fullName ?? null,
+          status: unit.status,
+          additionalInfo: unit.additionalInfo,
           companyId: unit.companyId,
           parentUnitId: unit.parentUnitId,
           childCount: unit._count.childUnits,
+          members: unit.members.map((m) => this.mapCompanyMember(m)),
           children,
         };
       });
+  }
+
+  private mapOrgMember(member: {
+    id: string;
+    position: string;
+    memberName: string;
+    phone: string | null;
+    email: string | null;
+    additionalInfo: string | null;
+  }): OrgMember {
+    return {
+      id: member.id,
+      position: member.position,
+      memberName: member.memberName,
+      phone: member.phone,
+      email: member.email,
+      additionalInfo: member.additionalInfo,
+    };
+  }
+
+  private mapCompanyMember(member: {
+    id: string;
+    position: string;
+    memberName: string;
+    phone: string | null;
+    email: string | null;
+    additionalInfo: string | null;
+    linkedProfileUserId: string | null;
+    linkedProfileUser: { fullName: string } | null;
+  }): OrgMember {
+    return {
+      id: member.id,
+      position: member.position,
+      memberName: member.memberName,
+      phone: member.phone,
+      email: member.email,
+      additionalInfo: member.additionalInfo,
+      linkedProfileUserId: member.linkedProfileUserId,
+      linkedProfileName: member.linkedProfileUser?.fullName ?? null,
+    };
   }
 
   private collectMatches(node: OrgTreeNode, search: string | undefined, matchedKeys: Set<string>) {
     const nodeKey = `${node.type}:${node.id}`;
     const haystack = [
       node.name,
-      node.code,
+      node.representativeName ?? '',
       node.managerName ?? '',
-      node.managerEmployeeCode ?? '',
+      node.linkedProfileName ?? '',
+      node.taxId ?? '',
+      node.phone ?? '',
+      node.email ?? '',
+      ...(node.members?.flatMap((m) => [m.memberName, m.position, m.email ?? '', m.phone ?? '']) ?? []),
     ]
       .join(' ')
       .toLowerCase();

@@ -3,16 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { OrgCodeService } from './org-code.service';
-import { CreateCompanyDto, UpdateCompanyDto } from './dto/organization.dto';
+import { CompanyMemberDto, CreateCompanyDto, UpdateCompanyDto } from './dto/organization.dto';
 
 @Injectable()
 export class CompaniesService {
-  constructor(
-    private prisma: PrismaService,
-    private orgCode: OrgCodeService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateCompanyDto) {
     const org = await this.prisma.organization.findFirst();
@@ -20,97 +17,196 @@ export class CompaniesService {
       throw new NotFoundException('Organization not found');
     }
 
-    const manager = await this.resolveManagerFields(dto.managerUserId, dto.managerName, dto.managerEmployeeCode);
-    const code = await this.orgCode.nextCompanyCode(org.id);
+    if (dto.linkedProfileUserId) {
+      await this.ensureUser(dto.linkedProfileUserId);
+    }
 
-    return this.prisma.company.create({
-      data: {
-        organizationId: org.id,
-        code,
-        name: dto.name,
-        description: dto.description,
-        managerName: manager.managerName,
-        managerEmployeeCode: manager.managerEmployeeCode,
-        managerUserId: manager.managerUserId,
-        displayOrder: dto.displayOrder ?? 0,
-        status: dto.status ?? 'ACTIVE',
-      },
+    const siblingMax = await this.prisma.company.aggregate({
+      where: { organizationId: org.id },
+      _max: { sortOrder: true },
     });
+
+    const company = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.company.create({
+        data: {
+          organizationId: org.id,
+          name: dto.name,
+          taxId: dto.taxId,
+          address: dto.address,
+          representativeName: dto.representativeName,
+          linkedProfileUserId: dto.linkedProfileUserId,
+          phone: dto.phone,
+          email: dto.email,
+          status: dto.status ?? 'ACTIVE',
+          sortOrder: (siblingMax._max.sortOrder ?? -1) + 1,
+        },
+      });
+
+      if (dto.members?.length) {
+        await this.createMembers(tx, created.id, dto.members);
+      }
+
+      return created;
+    });
+
+    return this.findOne(company.id);
   }
 
   async update(id: string, dto: UpdateCompanyDto) {
     await this.findOne(id);
-    const manager = await this.resolveManagerFields(
-      dto.managerUserId ?? undefined,
-      dto.managerName,
-      dto.managerEmployeeCode,
-      dto.managerUserId === null,
-    );
 
-    return this.prisma.company.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        description: dto.description,
-        displayOrder: dto.displayOrder,
-        status: dto.status,
-        managerName: manager.managerName,
-        managerEmployeeCode: manager.managerEmployeeCode,
-        managerUserId: manager.managerUserId,
-      },
+    if (dto.linkedProfileUserId) {
+      await this.ensureUser(dto.linkedProfileUserId);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.company.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          taxId: dto.taxId,
+          address: dto.address,
+          representativeName: dto.representativeName,
+          linkedProfileUserId: dto.linkedProfileUserId ?? undefined,
+          phone: dto.phone,
+          email: dto.email,
+          status: dto.status,
+        },
+      });
+
+      if (dto.members) {
+        await tx.companyMember.deleteMany({ where: { companyId: id } });
+        if (dto.members.length > 0) {
+          await this.createMembers(tx, id, dto.members);
+        }
+      }
     });
+
+    return this.findOne(id);
+  }
+
+  async reorder(id: string, direction: 'up' | 'down') {
+    const company = await this.prisma.company.findUnique({ where: { id } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    const siblings = await this.prisma.company.findMany({
+      where: { organizationId: company.organizationId },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+
+    const index = siblings.findIndex((item) => item.id === id);
+    if (index === -1) {
+      throw new NotFoundException('Company not found among siblings');
+    }
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= siblings.length) {
+      throw new BadRequestException(`Cannot move ${direction}`);
+    }
+
+    const current = siblings[index];
+    const target = siblings[targetIndex];
+
+    await this.prisma.$transaction([
+      this.prisma.company.update({
+        where: { id: current.id },
+        data: { sortOrder: target.sortOrder },
+      }),
+      this.prisma.company.update({
+        where: { id: target.id },
+        data: { sortOrder: current.sortOrder },
+      }),
+    ]);
+
+    return this.findOne(id);
   }
 
   async remove(id: string) {
-    const company = await this.findOne(id);
+    const company = await this.prisma.company.findUnique({ where: { id } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
     const childCount = await this.prisma.organizationUnit.count({
       where: { companyId: id },
     });
     if (childCount > 0) {
       throw new BadRequestException('Cannot delete company with organization units');
     }
-    await this.prisma.company.delete({ where: { id: company.id } });
+
+    await this.prisma.company.delete({ where: { id } });
     return { success: true };
   }
 
   async findOne(id: string) {
-    const company = await this.prisma.company.findUnique({ where: { id } });
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      include: {
+        linkedProfileUser: { select: { id: true, fullName: true } },
+        members: {
+          orderBy: { sortOrder: 'asc' },
+          include: { linkedProfileUser: { select: { id: true, fullName: true } } },
+        },
+      },
+    });
     if (!company) {
       throw new NotFoundException('Company not found');
     }
-    return company;
+    return {
+      id: company.id,
+      organizationId: company.organizationId,
+      name: company.name,
+      taxId: company.taxId,
+      address: company.address,
+      representativeName: company.representativeName,
+      linkedProfileUserId: company.linkedProfileUserId,
+      linkedProfileName: company.linkedProfileUser?.fullName ?? null,
+      phone: company.phone,
+      email: company.email,
+      status: company.status,
+      members: company.members.map((m) => ({
+        id: m.id,
+        position: m.position,
+        memberName: m.memberName,
+        linkedProfileUserId: m.linkedProfileUserId,
+        linkedProfileName: m.linkedProfileUser?.fullName ?? null,
+        phone: m.phone,
+        email: m.email,
+        additionalInfo: m.additionalInfo,
+      })),
+    };
   }
 
-  private async resolveManagerFields(
-    managerUserId?: string,
-    managerName?: string,
-    managerEmployeeCode?: string,
-    clearLink = false,
+  private async createMembers(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    members: CompanyMemberDto[],
   ) {
-    if (clearLink) {
-      return {
-        managerUserId: null,
-        managerName: managerName ?? null,
-        managerEmployeeCode: managerEmployeeCode ?? null,
-      };
-    }
-
-    if (managerUserId) {
-      const user = await this.prisma.user.findUnique({ where: { id: managerUserId } });
-      if (!user) {
-        throw new NotFoundException('Manager user not found');
+    for (const [index, member] of members.entries()) {
+      if (member.linkedProfileUserId) {
+        await this.ensureUser(member.linkedProfileUserId);
       }
-      return {
-        managerUserId: user.id,
-        managerName: managerName ?? user.fullName,
-        managerEmployeeCode: managerEmployeeCode ?? user.employeeCode,
-      };
+      await tx.companyMember.create({
+        data: {
+          companyId,
+          position: member.position,
+          memberName: member.memberName,
+          linkedProfileUserId: member.linkedProfileUserId,
+          phone: member.phone,
+          email: member.email,
+          additionalInfo: member.additionalInfo,
+          sortOrder: index,
+        },
+      });
     }
+  }
 
-    return {
-      managerUserId: null,
-      managerName: managerName ?? null,
-      managerEmployeeCode: managerEmployeeCode ?? null,
-    };
+  private async ensureUser(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Linked profile user not found');
+    }
   }
 }

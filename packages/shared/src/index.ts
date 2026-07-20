@@ -77,17 +77,32 @@ export interface PaginatedResult<T> {
   pageSize: number;
 }
 
+export interface OrgMember {
+  id: string;
+  position: string;
+  memberName: string;
+  phone?: string | null;
+  email?: string | null;
+  additionalInfo?: string | null;
+  linkedProfileUserId?: string | null;
+  linkedProfileName?: string | null;
+}
+
 export interface OrgTreeNode {
   id: string;
   type: OrgNodeType;
-  code: string;
   name: string;
-  description?: string | null;
-  status: EntityStatus;
+  representativeName?: string | null;
   managerName?: string | null;
-  managerEmployeeCode?: string | null;
-  managerUserId?: string | null;
-  displayOrder: number;
+  linkedProfileUserId?: string | null;
+  linkedProfileName?: string | null;
+  additionalInfo?: string | null;
+  taxId?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  status?: EntityStatus;
+  members?: OrgMember[];
   childCount: number;
   companyId?: string;
   parentUnitId?: string | null;
@@ -109,14 +124,3 @@ export function hasAnyPermission(
 ): boolean {
   return required.some((p) => userPermissions.includes(p));
 }
-
-/** Quy tắc mã: C01, C02... cho công ty; C01-001, C01-002... cho đơn vị trong công ty */
-export function formatCompanyCode(sequence: number): string {
-  return `C${String(sequence).padStart(2, '0')}`;
-}
-
-export function formatUnitCode(companyCode: string, sequence: number): string {
-  return `${companyCode}-${String(sequence).padStart(3, '0')}`;
-}
-
-export const ORGANIZATION_CODE = 'ORG';
