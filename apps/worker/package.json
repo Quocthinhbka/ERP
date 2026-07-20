@@ -1,0 +1,22 @@
+{
+  "name": "@erp/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "test": "node --import tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@erp/shared": "workspace:*",
+    "bullmq": "^5.0.0",
+    "dotenv": "^16.4.0",
+    "ioredis": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  }
+}
