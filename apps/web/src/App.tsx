@@ -5,7 +5,9 @@ import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { RolesPage } from './pages/setup/RolesPage';
 import { OrganizationPage } from './pages/setup/OrganizationPage';
-import { UsersPage } from './pages/setup/UsersPage';
+import { AccountsPage } from './pages/setup/AccountsPage';
+import { AccountDetailPage } from './pages/setup/AccountDetailPage';
+import { PermissionGroupsPage } from './pages/setup/PermissionGroupsPage';
 import { PermissionsPage } from './pages/setup/PermissionsPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -39,8 +41,11 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="setup/roles" element={<RolesPage />} />
             <Route path="setup/organization" element={<OrganizationPage />} />
-            <Route path="setup/users" element={<UsersPage />} />
+            <Route path="setup/accounts" element={<AccountsPage />} />
+            <Route path="setup/accounts/:id" element={<AccountDetailPage />} />
+            <Route path="setup/permission-groups" element={<PermissionGroupsPage />} />
             <Route path="setup/permissions" element={<PermissionsPage />} />
+            <Route path="setup/users" element={<Navigate to="/setup/accounts" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

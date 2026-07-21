@@ -15,10 +15,10 @@ describe('Auth (e2e)', () => {
     await app.close();
   });
 
-  it('POST /api/auth/login with valid credentials', async () => {
+  it('POST /api/auth/login with valid email identifier', async () => {
     const res = await request(getHttpServer(app))
       .post('/api/auth/login')
-      .send({ email: 'admin@hyperlabs.vn', password: 'Admin@123' })
+      .send({ identifier: 'admin@hyperlabs.vn', password: 'Admin@123' })
       .expect(200);
 
     expect(res.body.accessToken).toBeDefined();
@@ -30,10 +30,30 @@ describe('Auth (e2e)', () => {
     refreshToken = res.body.refreshToken;
   });
 
+  it('POST /api/auth/login with valid employee code identifier', async () => {
+    const res = await request(getHttpServer(app))
+      .post('/api/auth/login')
+      .send({ identifier: 'NV001', password: 'Admin@123' })
+      .expect(200);
+
+    expect(res.body.accessToken).toBeDefined();
+    expect(res.body.user.email).toBe('admin@hyperlabs.vn');
+  });
+
+  it('POST /api/auth/login with valid phone identifier', async () => {
+    const res = await request(getHttpServer(app))
+      .post('/api/auth/login')
+      .send({ identifier: '0900000001', password: 'Admin@123' })
+      .expect(200);
+
+    expect(res.body.accessToken).toBeDefined();
+    expect(res.body.user.email).toBe('admin@hyperlabs.vn');
+  });
+
   it('POST /api/auth/login with invalid credentials returns 401', async () => {
     await request(getHttpServer(app))
       .post('/api/auth/login')
-      .send({ email: 'admin@hyperlabs.vn', password: 'wrong' })
+      .send({ identifier: 'admin@hyperlabs.vn', password: 'wrong' })
       .expect(401);
   });
 

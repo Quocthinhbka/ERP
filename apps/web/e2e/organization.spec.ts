@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto('/login');
-  await page.getByTestId('login-email').fill('admin@hyperlabs.vn');
+  await page.getByTestId('login-identifier').fill('admin@hyperlabs.vn');
   await page.getByTestId('login-password').fill('Admin@123');
   await page.getByTestId('login-submit').click();
   await expect(page.getByRole('heading', { name: 'Tổng quan' })).toBeVisible({ timeout: 10000 });
@@ -49,5 +49,54 @@ test.describe('Organization page', () => {
     await page.goto('/setup/organization');
     await expect(page.getByRole('button', { name: 'Export Excel' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Import Excel' })).toBeVisible();
+  });
+
+  test('leaf unit employees appear on tree as position - name', async ({ page, request }) => {
+    test.setTimeout(60000);
+    const apiBase = 'http://127.0.0.1:3000/api';
+    const login = await request.post(`${apiBase}/auth/login`, {
+      data: { identifier: 'admin@hyperlabs.vn', password: 'Admin@123' },
+    });
+    expect(login.ok()).toBeTruthy();
+    const { accessToken } = (await login.json()) as { accessToken: string };
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    const companyName = `Công ty Leaf Emp ${Date.now()}`;
+    const unitName = `Đơn vị lá Emp ${Date.now()}`;
+    const companyRes = await request.post(`${apiBase}/organization/companies`, {
+      headers,
+      data: { name: companyName },
+    });
+    expect(companyRes.ok()).toBeTruthy();
+    const company = (await companyRes.json()) as { id: string };
+
+    const unitRes = await request.post(`${apiBase}/organization/units`, {
+      headers,
+      data: { companyId: company.id, name: unitName },
+    });
+    expect(unitRes.ok()).toBeTruthy();
+    const unit = (await unitRes.json()) as { id: string };
+
+    const memberRes = await request.patch(`${apiBase}/organization/units/${unit.id}`, {
+      headers,
+      data: {
+        members: [{ position: 'Nhân viên', memberName: 'Nguyễn Văn A' }],
+      },
+    });
+    expect(memberRes.ok()).toBeTruthy();
+
+    await loginAsAdmin(page);
+    await page.goto('/setup/organization');
+    await expect(page.getByRole('tree')).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: 'Mở rộng' }).click();
+    await expect(page.getByRole('treeitem').filter({ hasText: unitName }).first()).toBeVisible({
+      timeout: 10000,
+    });
+    const memberRow = page.getByRole('treeitem').filter({ hasText: 'Nhân viên - Nguyễn Văn A' }).first();
+    await expect(memberRow).toBeVisible({ timeout: 10000 });
+    await memberRow.click();
+    await expect(page.getByText('Chi tiết chức vụ')).toBeVisible();
+    await expect(page.getByText('Nguyễn Văn A').first()).toBeVisible();
+    await expect(page.getByText('Nhân viên').first()).toBeVisible();
   });
 });

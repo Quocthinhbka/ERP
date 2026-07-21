@@ -3,13 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { PositionHolderKind } from '@erp/shared';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyMemberDto, CreateCompanyDto, UpdateCompanyDto } from './dto/organization.dto';
+import { PositionPermissionsService } from './position-permissions.service';
 
 @Injectable()
 export class CompaniesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private positionPermissions: PositionPermissionsService,
+  ) {}
 
   async create(dto: CreateCompanyDto) {
     const org = await this.prisma.organization.findFirst();
@@ -46,6 +51,15 @@ export class CompaniesService {
         await this.createMembers(tx, created.id, dto.members);
       }
 
+      if (dto.positionPermission !== undefined) {
+        await this.positionPermissions.upsertPositionPermission(
+          PositionHolderKind.COMPANY_REP,
+          created.id,
+          dto.positionPermission,
+          tx,
+        );
+      }
+
       return created;
     });
 
@@ -79,6 +93,15 @@ export class CompaniesService {
         if (dto.members.length > 0) {
           await this.createMembers(tx, id, dto.members);
         }
+      }
+
+      if (dto.positionPermission !== undefined) {
+        await this.positionPermissions.upsertPositionPermission(
+          PositionHolderKind.COMPANY_REP,
+          id,
+          dto.positionPermission,
+          tx,
+        );
       }
     });
 
@@ -136,6 +159,7 @@ export class CompaniesService {
       throw new BadRequestException('Cannot delete company with organization units');
     }
 
+    await this.positionPermissions.deleteByHolder(PositionHolderKind.COMPANY_REP, id);
     await this.prisma.company.delete({ where: { id } });
     return { success: true };
   }
@@ -154,6 +178,10 @@ export class CompaniesService {
     if (!company) {
       throw new NotFoundException('Company not found');
     }
+    const positionPermission = await this.positionPermissions.getPositionPermission(
+      PositionHolderKind.COMPANY_REP,
+      company.id,
+    );
     return {
       id: company.id,
       organizationId: company.organizationId,
@@ -166,6 +194,7 @@ export class CompaniesService {
       phone: company.phone,
       email: company.email,
       status: company.status,
+      positionPermission,
       members: company.members.map((m) => ({
         id: m.id,
         position: m.position,

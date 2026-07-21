@@ -1,24 +1,35 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { PositionHolderKind } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateOrganizationDto } from './dto/organization.dto';
+import { PositionPermissionsService } from './position-permissions.service';
 
 @Injectable()
 export class OrganizationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private positionPermissions: PositionPermissionsService,
+  ) {}
 
   async getCurrent() {
     const org = await this.prisma.organization.findFirst({
       include: {
         linkedProfileUser: { select: { id: true, fullName: true } },
-        members: { orderBy: { sortOrder: 'asc' } },
+        members: {
+          orderBy: { sortOrder: 'asc' },
+          include: { linkedProfileUser: { select: { id: true, fullName: true } } },
+        },
         _count: { select: { companies: true } },
       },
     });
     if (!org) {
       throw new NotFoundException('Organization not found');
     }
-    return this.toResponse(org);
+    const positionPermission = await this.positionPermissions.getPositionPermission(
+      PositionHolderKind.ORGANIZATION_REP,
+      org.id,
+    );
+    return this.toResponse(org, positionPermission);
   }
 
   async update(dto: UpdateOrganizationDto) {
@@ -43,20 +54,37 @@ export class OrganizationService {
       });
 
       if (dto.members) {
+        for (const member of dto.members) {
+          if (member.linkedProfileUserId) {
+            await this.ensureUser(member.linkedProfileUserId);
+          }
+        }
         await tx.organizationMember.deleteMany({ where: { organizationId: org.id } });
         if (dto.members.length > 0) {
-          await tx.organizationMember.createMany({
-            data: dto.members.map((m, index) => ({
-              organizationId: org.id,
-              position: m.position,
-              memberName: m.memberName,
-              phone: m.phone,
-              email: m.email,
-              additionalInfo: m.additionalInfo,
-              sortOrder: index,
-            })),
-          });
+          for (const [index, m] of dto.members.entries()) {
+            await tx.organizationMember.create({
+              data: {
+                organizationId: org.id,
+                position: m.position,
+                memberName: m.memberName,
+                linkedProfileUserId: m.linkedProfileUserId,
+                phone: m.phone,
+                email: m.email,
+                additionalInfo: m.additionalInfo,
+                sortOrder: index,
+              },
+            });
+          }
         }
+      }
+
+      if (dto.positionPermission !== undefined) {
+        await this.positionPermissions.upsertPositionPermission(
+          PositionHolderKind.ORGANIZATION_REP,
+          org.id,
+          dto.positionPermission,
+          tx,
+        );
       }
     });
 
@@ -70,23 +98,30 @@ export class OrganizationService {
     }
   }
 
-  private toResponse(org: {
-    id: string;
-    name: string;
-    representativeName: string | null;
-    linkedProfileUserId: string | null;
-    additionalInfo: string | null;
-    linkedProfileUser: { id: string; fullName: string } | null;
-    members: Array<{
+  private toResponse(
+    org: {
       id: string;
-      position: string;
-      memberName: string;
-      phone: string | null;
-      email: string | null;
+      name: string;
+      representativeName: string | null;
+      linkedProfileUserId: string | null;
       additionalInfo: string | null;
-    }>;
-    _count: { companies: number };
-  }) {
+      linkedProfileUser: { id: string; fullName: string } | null;
+      members: Array<{
+        id: string;
+        position: string;
+        memberName: string;
+        linkedProfileUserId: string | null;
+        phone: string | null;
+        email: string | null;
+        additionalInfo: string | null;
+        linkedProfileUser: { fullName: string } | null;
+      }>;
+      _count: { companies: number };
+    },
+    positionPermission: Awaited<
+      ReturnType<PositionPermissionsService['getPositionPermission']>
+    >,
+  ) {
     return {
       id: org.id,
       name: org.name,
@@ -94,10 +129,13 @@ export class OrganizationService {
       linkedProfileUserId: org.linkedProfileUserId,
       linkedProfileName: org.linkedProfileUser?.fullName ?? null,
       additionalInfo: org.additionalInfo,
+      positionPermission,
       members: org.members.map((m) => ({
         id: m.id,
         position: m.position,
         memberName: m.memberName,
+        linkedProfileUserId: m.linkedProfileUserId,
+        linkedProfileName: m.linkedProfileUser?.fullName ?? null,
         phone: m.phone,
         email: m.email,
         additionalInfo: m.additionalInfo,

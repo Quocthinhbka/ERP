@@ -1,8 +1,16 @@
-import { IsArray, IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class LoginDto {
-  @IsEmail()
-  email!: string;
+  @IsString()
+  @IsNotEmpty()
+  identifier!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -26,6 +34,14 @@ export class CreateUserDto {
   @IsString()
   @IsNotEmpty()
   fullName!: string;
+
+  @IsOptional()
+  @IsString()
+  employeeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
 
   @IsArray()
   @IsString({ each: true })

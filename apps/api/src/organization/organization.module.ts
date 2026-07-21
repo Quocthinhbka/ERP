@@ -6,9 +6,10 @@ import { CompaniesService } from './companies.service';
 import { OrganizationUnitsService } from './organization-units.service';
 import { OrganizationTreeService } from './organization-tree.service';
 import { OrganizationIoService } from './organization-io.service';
+import { PositionPermissionsModule } from './position-permissions.module';
 
 @Module({
-  imports: [QueueModule],
+  imports: [QueueModule, PositionPermissionsModule],
   controllers: [OrganizationController],
   providers: [
     OrganizationService,

@@ -2,6 +2,7 @@ export enum PermissionModule {
   SETUP = 'setup',
   USER = 'user',
   ROLE = 'role',
+  PERMISSION_GROUP = 'permission_group',
   ORGANIZATION = 'organization',
 }
 
@@ -14,6 +15,38 @@ export enum OrgNodeType {
   ORGANIZATION = 'organization',
   COMPANY = 'company',
   UNIT = 'unit',
+}
+
+export const PositionHolderKind = {
+  ORGANIZATION_REP: 'ORGANIZATION_REP',
+  COMPANY_REP: 'COMPANY_REP',
+  UNIT_MANAGER: 'UNIT_MANAGER',
+  UNIT_MEMBER: 'UNIT_MEMBER',
+} as const;
+
+export type PositionHolderKind =
+  (typeof PositionHolderKind)[keyof typeof PositionHolderKind];
+
+
+export interface OrgScopeNode {
+  type: OrgNodeType;
+  id: string;
+}
+
+export interface PositionPermissionScopeInput {
+  includeSelf: boolean;
+  parentScopes: OrgScopeNode[];
+}
+
+export interface PositionPermissionSummary {
+  holderKind: PositionHolderKind;
+  holderId: string;
+  permissionGroupVersionId: string;
+  permissionGroupName: string;
+  permissionGroupId: string;
+  selectedPermissionIds: string[];
+  includeSelf: boolean;
+  parentScopes: OrgScopeNode[];
 }
 
 export const Permissions = {
@@ -29,6 +62,10 @@ export const Permissions = {
   ROLE_DELETE: 'role:delete',
   PERMISSION_VIEW: 'permission:view',
   PERMISSION_ASSIGN: 'permission:assign',
+  PERMISSION_GROUP_VIEW: 'permission_group:view',
+  PERMISSION_GROUP_CREATE: 'permission_group:create',
+  PERMISSION_GROUP_UPDATE: 'permission_group:update',
+  PERMISSION_GROUP_DELETE: 'permission_group:delete',
   ORGANIZATION_VIEW: 'organization:view',
   ORGANIZATION_MANAGE: 'organization:manage',
   COMPANY_VIEW: 'company:view',
@@ -56,6 +93,8 @@ export interface JwtPayload {
   sub: string;
   email: string;
   permissions: PermissionCode[];
+  isSystemAdmin?: boolean;
+  orgScopes?: OrgScopeNode[];
 }
 
 export interface AuthTokens {
@@ -77,6 +116,36 @@ export interface PaginatedResult<T> {
   pageSize: number;
 }
 
+export interface PermissionGroupVersionSummary {
+  id: string;
+  name: string;
+  versionNumber: number;
+  isCustom: boolean;
+  permissionCount: number;
+  positionCount: number;
+}
+
+export interface PermissionGroupSummary {
+  id: string;
+  code: string;
+  name: string;
+  isDefault: boolean;
+  permissionCount: number;
+  positionCount: number;
+  versions: PermissionGroupVersionSummary[];
+}
+
+export interface AccountSummary {
+  id: string;
+  email: string;
+  fullName: string;
+  employeeCode: string | null;
+  phone: string | null;
+  linkedEmployeeProfileId: string | null;
+  isActive: boolean;
+  roles: Array<{ id: string; code: string; name: string }>;
+}
+
 export interface OrgMember {
   id: string;
   position: string;
@@ -86,6 +155,7 @@ export interface OrgMember {
   additionalInfo?: string | null;
   linkedProfileUserId?: string | null;
   linkedProfileName?: string | null;
+  positionPermission?: PositionPermissionSummary | null;
 }
 
 export interface OrgTreeNode {
@@ -108,6 +178,29 @@ export interface OrgTreeNode {
   parentUnitId?: string | null;
   organizationId?: string;
   children: OrgTreeNode[];
+  positionPermission?: PositionPermissionSummary | null;
+  isLeaf?: boolean;
+}
+
+export function orgScopeKey(type: OrgNodeType | string, id: string): string {
+  return `${type}:${id}`;
+}
+
+export function hasOrgScopeAccess(
+  isSystemAdmin: boolean,
+  grantRoots: OrgScopeNode[],
+  nodeType: OrgNodeType,
+  nodeId: string,
+  ancestorKeys: string[],
+): boolean {
+  if (isSystemAdmin) {
+    return true;
+  }
+  const nodeKey = orgScopeKey(nodeType, nodeId);
+  return grantRoots.some((grant) => {
+    const grantKey = orgScopeKey(grant.type, grant.id);
+    return grantKey === nodeKey || ancestorKeys.includes(grantKey);
+  });
 }
 
 export function hasPermission(

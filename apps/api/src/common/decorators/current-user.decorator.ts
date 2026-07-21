@@ -1,10 +1,12 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { PermissionCode } from '@erp/shared';
+import { OrgScopeNode, PermissionCode } from '@erp/shared';
 
 export interface RequestUser {
   id: string;
   email: string;
   permissions: PermissionCode[];
+  isSystemAdmin: boolean;
+  orgScopes: OrgScopeNode[];
 }
 
 export const CurrentUser = createParamDecorator(

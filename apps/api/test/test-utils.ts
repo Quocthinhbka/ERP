@@ -24,3 +24,12 @@ export async function createTestApp(): Promise<INestApplication> {
 export function getHttpServer(app: INestApplication) {
   return app.getHttpServer() as Parameters<typeof request>[0];
 }
+
+export async function loginAsAdmin(app: INestApplication): Promise<string> {
+  const res = await request(getHttpServer(app))
+    .post('/api/auth/login')
+    .send({ identifier: 'admin@hyperlabs.vn', password: 'Admin@123' })
+    .expect(200);
+
+  return res.body.accessToken as string;
+}

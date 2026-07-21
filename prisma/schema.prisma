@@ -11,21 +11,31 @@ enum EntityStatus {
   INACTIVE
 }
 
+enum PositionHolderKind {
+  ORGANIZATION_REP
+  COMPANY_REP
+  UNIT_MANAGER
+  UNIT_MEMBER
+}
+
 model User {
-  id                         String                 @id @default(uuid())
-  email                      String                 @unique
-  passwordHash               String                 @map("password_hash")
-  fullName                   String                 @map("full_name")
-  employeeCode               String?                @unique @map("employee_code")
-  isActive                   Boolean                @default(true) @map("is_active")
-  createdAt                  DateTime               @default(now()) @map("created_at")
-  updatedAt                  DateTime               @updatedAt @map("updated_at")
-  roles                      UserRole[]
-  organizationLinkedProfiles Organization[]         @relation("OrgLinkedProfile")
-  companyLinkedProfiles      Company[]              @relation("CompanyLinkedProfile")
-  companyMemberProfiles      CompanyMember[]        @relation("CompanyMemberLinkedProfile")
-  unitLinkedProfiles         OrganizationUnit[]     @relation("UnitLinkedProfile")
-  unitMemberProfiles         OrganizationUnitMember[] @relation("UnitMemberLinkedProfile")
+  id                      String                   @id @default(uuid())
+  email                   String                   @unique
+  passwordHash            String                   @map("password_hash")
+  fullName                String                   @map("full_name")
+  employeeCode            String?                  @unique @map("employee_code")
+  phone                   String?                  @unique
+  linkedEmployeeProfileId String?                  @map("linked_employee_profile_id")
+  isActive                Boolean                  @default(true) @map("is_active")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  roles                   UserRole[]
+  organizationLinkedProfiles Organization[]        @relation("OrgLinkedProfile")
+  organizationMemberProfiles OrganizationMember[]  @relation("OrgMemberLinkedProfile")
+  companyLinkedProfiles   Company[]                @relation("CompanyLinkedProfile")
+  companyMemberProfiles   CompanyMember[]          @relation("CompanyMemberLinkedProfile")
+  unitLinkedProfiles      OrganizationUnit[]       @relation("UnitLinkedProfile")
+  unitMemberProfiles      OrganizationUnitMember[] @relation("UnitMemberLinkedProfile")
 
   @@map("users")
 }
@@ -45,14 +55,16 @@ model Role {
 }
 
 model Permission {
-  id          String           @id @default(uuid())
-  code        String           @unique
-  name        String
-  module      String
-  description String?
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  roles       RolePermission[]
+  id            String                             @id @default(uuid())
+  code          String                             @unique
+  name          String
+  module        String
+  description   String?
+  createdAt     DateTime                           @default(now()) @map("created_at")
+  updatedAt     DateTime                           @updatedAt @map("updated_at")
+  roles         RolePermission[]
+  groups        PermissionGroupPermission[]
+  groupVersions PermissionGroupVersionPermission[]
 
   @@map("permissions")
 }
@@ -79,6 +91,86 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model PermissionGroup {
+  id          String                      @id @default(uuid())
+  code        String                      @unique
+  name        String
+  description String?
+  isDefault   Boolean                     @default(false) @map("is_default")
+  createdAt   DateTime                    @default(now()) @map("created_at")
+  updatedAt   DateTime                    @updatedAt @map("updated_at")
+  permissions PermissionGroupPermission[]
+  versions    PermissionGroupVersion[]
+
+  @@map("permission_groups")
+}
+
+model PermissionGroupPermission {
+  permissionGroupId String          @map("permission_group_id")
+  permissionId      String          @map("permission_id")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  permissionGroup   PermissionGroup @relation(fields: [permissionGroupId], references: [id], onDelete: Cascade)
+  permission        Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([permissionGroupId, permissionId])
+  @@map("permission_group_permissions")
+}
+
+model PermissionGroupVersion {
+  id                 String                             @id @default(uuid())
+  permissionGroupId  String                             @map("permission_group_id")
+  versionNumber      Int                                @default(0) @map("version_number")
+  name               String
+  isCustom           Boolean                            @default(false) @map("is_custom")
+  createdAt          DateTime                           @default(now()) @map("created_at")
+  updatedAt          DateTime                           @updatedAt @map("updated_at")
+  permissionGroup    PermissionGroup                    @relation(fields: [permissionGroupId], references: [id], onDelete: Cascade)
+  permissions        PermissionGroupVersionPermission[]
+  positionPermissions PositionPermission[]
+
+  @@unique([permissionGroupId, versionNumber])
+  @@map("permission_group_versions")
+}
+
+model PermissionGroupVersionPermission {
+  versionId    String                 @map("version_id")
+  permissionId String                 @map("permission_id")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  version      PermissionGroupVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  permission   Permission             @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([versionId, permissionId])
+  @@map("permission_group_version_permissions")
+}
+
+model PositionPermission {
+  id                       String                          @id @default(uuid())
+  holderKind               PositionHolderKind              @map("holder_kind")
+  holderId                 String                          @map("holder_id")
+  permissionGroupVersionId String                          @map("permission_group_version_id")
+  includeSelf              Boolean                         @default(true) @map("include_self")
+  createdAt                DateTime                        @default(now()) @map("created_at")
+  updatedAt                DateTime                        @updatedAt @map("updated_at")
+  permissionGroupVersion   PermissionGroupVersion          @relation(fields: [permissionGroupVersionId], references: [id], onDelete: Restrict)
+  parentScopes             PositionPermissionParentScope[]
+
+  @@unique([holderKind, holderId])
+  @@index([holderId])
+  @@map("position_permissions")
+}
+
+model PositionPermissionParentScope {
+  id                   String             @id @default(uuid())
+  positionPermissionId String             @map("position_permission_id")
+  nodeType             String             @map("node_type")
+  nodeId               String             @map("node_id")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  positionPermission   PositionPermission @relation(fields: [positionPermissionId], references: [id], onDelete: Cascade)
+
+  @@unique([positionPermissionId, nodeType, nodeId])
+  @@map("position_permission_parent_scopes")
+}
+
 model Organization {
   id                  String               @id @default(uuid())
   name                String
@@ -95,17 +187,19 @@ model Organization {
 }
 
 model OrganizationMember {
-  id             String       @id @default(uuid())
-  organizationId String       @map("organization_id")
-  position       String
-  memberName     String       @map("member_name")
-  phone          String?
-  email          String?
-  additionalInfo String?      @map("additional_info")
-  sortOrder      Int          @default(0) @map("sort_order")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                  String       @id @default(uuid())
+  organizationId      String       @map("organization_id")
+  position            String
+  memberName          String       @map("member_name")
+  linkedProfileUserId String?      @map("linked_profile_user_id")
+  phone               String?
+  email               String?
+  additionalInfo      String?      @map("additional_info")
+  sortOrder           Int          @default(0) @map("sort_order")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  linkedProfileUser   User?        @relation("OrgMemberLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
 
   @@map("organization_members")
 }

@@ -30,6 +30,12 @@ export class UsersController {
     return this.usersService.findAll(Number(page), Number(pageSize), search);
   }
 
+  @Get(':id/permissions')
+  @RequirePermissions(Permissions.USER_VIEW, Permissions.PERMISSION_ASSIGN)
+  getPermissions(@Param('id') id: string) {
+    return this.usersService.getPermissions(id);
+  }
+
   @Get(':id')
   @RequirePermissions(Permissions.USER_VIEW)
   findOne(@Param('id') id: string) {

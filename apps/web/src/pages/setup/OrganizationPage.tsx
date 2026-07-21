@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Card,
+  Checkbox,
   Col,
   Collapse,
   Descriptions,
@@ -20,6 +21,7 @@ import {
   message,
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
+import type { NamePath } from 'antd/es/form/interface';
 import {
   ApartmentOutlined,
   ArrowDownOutlined,
@@ -31,8 +33,16 @@ import {
   MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
-import { EntityStatus, OrgMember, OrgNodeType, OrgTreeNode, Permissions } from '@erp/shared';
+import {
+  EntityStatus,
+  OrgMember,
+  OrgNodeType,
+  OrgTreeNode,
+  Permissions,
+  PositionPermissionSummary,
+} from '@erp/shared';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { OrganizationIoActions } from './OrganizationIoActions';
@@ -49,6 +59,24 @@ interface UserOption {
   employeeCode: string | null;
 }
 
+interface PermissionGroupOption {
+  id: string;
+  name: string;
+  versions: Array<{ id: string; name: string; isCustom: boolean }>;
+}
+
+interface AncestorOption {
+  type: OrgNodeType;
+  id: string;
+  name: string;
+}
+
+interface PositionPermissionFormValue {
+  permissionGroupVersionId?: string;
+  includeSelf?: boolean;
+  parentScopeKeys?: string[];
+}
+
 const HEADER_HEIGHT = 48;
 const CONTENT_VERTICAL_CHROME = 48;
 const ORG_PAGE_HEIGHT = `calc(100vh - ${HEADER_HEIGHT + CONTENT_VERTICAL_CHROME}px)`;
@@ -57,10 +85,17 @@ type SelectedNode = {
   type: OrgNodeType;
   id: string;
   data: OrgTreeNode;
+  member?: OrgMember;
 };
+
+const UNIT_MEMBER_KEY_PREFIX = 'unit-member:';
 
 function nodeKey(node: { type: OrgNodeType | string; id: string }) {
   return `${node.type}:${node.id}`;
+}
+
+function unitMemberKey(memberId: string) {
+  return `${UNIT_MEMBER_KEY_PREFIX}${memberId}`;
 }
 
 function statusTag(status?: EntityStatus) {
@@ -76,6 +111,23 @@ function findNodeInTree(root: OrgTreeNode, key: string): OrgTreeNode | null {
   if (nodeKey(root) === key) return root;
   for (const child of root.children) {
     const found = findNodeInTree(child, key);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findUnitMemberInTree(
+  root: OrgTreeNode,
+  memberId: string,
+): { unit: OrgTreeNode; member: OrgMember } | null {
+  if (root.type === OrgNodeType.UNIT) {
+    const member = root.members?.find((m) => m.id === memberId);
+    if (member) {
+      return { unit: root, member };
+    }
+  }
+  for (const child of root.children) {
+    const found = findUnitMemberInTree(child, memberId);
     if (found) return found;
   }
   return null;
@@ -99,6 +151,32 @@ function personLabel(node: OrgTreeNode) {
 function toTreeData(node: OrgTreeNode, matchedKeys: Set<string>): DataNode {
   const key = nodeKey(node);
   const person = personLabel(node);
+  const orgChildren = node.children.map((child) => toTreeData(child, matchedKeys));
+  const isLeafUnit =
+    node.type === OrgNodeType.UNIT &&
+    orgChildren.length === 0 &&
+    (node.isLeaf ?? node.childCount === 0);
+
+  const memberChildren: DataNode[] =
+    isLeafUnit && node.members?.length
+      ? node.members.map((m) => ({
+          key: unitMemberKey(m.id),
+          title: (
+            <span>
+              <Typography.Text strong style={{ color: 'rgba(0, 0, 0, 0.88)' }}>
+                {m.position}
+              </Typography.Text>
+              <Typography.Text type="secondary"> - </Typography.Text>
+              <Typography.Text type="secondary">{m.memberName}</Typography.Text>
+            </span>
+          ),
+          selectable: true,
+          isLeaf: true,
+          children: [],
+        }))
+      : [];
+
+  const children = [...orgChildren, ...memberChildren];
   return {
     key,
     title: (
@@ -112,9 +190,9 @@ function toTreeData(node: OrgTreeNode, matchedKeys: Set<string>): DataNode {
         {statusTag(node.status)}
       </Space>
     ),
-    children: node.children.map((child) => toTreeData(child, matchedKeys)),
+    children,
     selectable: true,
-    isLeaf: node.children.length === 0,
+    isLeaf: children.length === 0,
   };
 }
 
@@ -165,14 +243,82 @@ function userSelectOptions(users: UserOption[]) {
   }));
 }
 
-function memberFieldsToForm(members?: OrgMember[]) {
+function scopeTypeLabel(type: OrgNodeType | string) {
+  if (type === OrgNodeType.ORGANIZATION || type === 'organization') return 'Tổ chức';
+  if (type === OrgNodeType.COMPANY || type === 'company') return 'Công ty';
+  return 'Đơn vị';
+}
+
+function findPathToNode(
+  root: OrgTreeNode,
+  targetKey: string,
+  path: OrgTreeNode[] = [],
+): OrgTreeNode[] | null {
+  const next = [...path, root];
+  if (nodeKey(root) === targetKey) return next;
+  for (const child of root.children) {
+    const found = findPathToNode(child, targetKey, next);
+    if (found) return found;
+  }
+  return null;
+}
+
+function getAncestorOptions(tree: OrgTreeNode | null, targetKey: string): AncestorOption[] {
+  if (!tree) return [];
+  const path = findPathToNode(tree, targetKey);
+  if (!path || path.length <= 1) return [];
+  return path.slice(0, -1).map((n) => ({ type: n.type, id: n.id, name: n.name }));
+}
+
+function positionPermissionToForm(
+  pp?: PositionPermissionSummary | null,
+): PositionPermissionFormValue {
+  if (!pp) {
+    return { includeSelf: true, parentScopeKeys: [] };
+  }
+  return {
+    permissionGroupVersionId: pp.permissionGroupVersionId,
+    includeSelf: pp.includeSelf,
+    parentScopeKeys: pp.parentScopes.map((s) => `${s.type}:${s.id}`),
+  };
+}
+
+function positionPermissionToPayload(formValue?: PositionPermissionFormValue | null) {
+  if (!formValue?.permissionGroupVersionId) {
+    return null;
+  }
+  return {
+    permissionGroupVersionId: formValue.permissionGroupVersionId,
+    includeSelf: formValue.includeSelf ?? true,
+    parentScopes: (formValue.parentScopeKeys ?? []).map((key) => {
+      const [type, id] = key.split(':');
+      return { type: type as 'organization' | 'company' | 'unit', id };
+    }),
+  };
+}
+
+function formatPositionPermissionSummary(pp?: PositionPermissionSummary | null) {
+  if (!pp) return 'Chưa gán';
+  const scopes: string[] = [];
+  if (pp.includeSelf) scopes.push('Chỉ cá nhân');
+  for (const s of pp.parentScopes) {
+    scopes.push(scopeTypeLabel(s.type));
+  }
+  return `${pp.permissionGroupName}${scopes.length ? ` — ${scopes.join(', ')}` : ''}`;
+}
+
+function memberFieldsToForm(members?: OrgMember[], withPositionPermission = false) {
   return (members ?? []).map((m) => ({
+    id: m.id,
     position: m.position,
     memberName: m.memberName,
     phone: m.phone ?? undefined,
     email: m.email ?? undefined,
     additionalInfo: m.additionalInfo ?? undefined,
     linkedProfileUserId: m.linkedProfileUserId ?? undefined,
+    ...(withPositionPermission
+      ? { positionPermission: positionPermissionToForm(m.positionPermission) }
+      : {}),
   }));
 }
 
@@ -184,6 +330,7 @@ function nodeToFormValues(node: OrgTreeNode) {
       linkedProfileUserId: node.linkedProfileUserId,
       additionalInfo: node.additionalInfo,
       members: memberFieldsToForm(node.members),
+      positionPermission: positionPermissionToForm(node.positionPermission),
     };
   }
   if (node.type === OrgNodeType.COMPANY) {
@@ -197,24 +344,76 @@ function nodeToFormValues(node: OrgTreeNode) {
       email: node.email,
       status: node.status ?? EntityStatus.ACTIVE,
       members: memberFieldsToForm(node.members),
+      positionPermission: positionPermissionToForm(node.positionPermission),
     };
   }
+  const isLeaf = node.isLeaf ?? node.childCount === 0;
   return {
     name: node.name,
     managerName: node.managerName,
     linkedProfileUserId: node.linkedProfileUserId,
     status: node.status ?? EntityStatus.ACTIVE,
     additionalInfo: node.additionalInfo,
-    members: memberFieldsToForm(node.members),
+    positionPermission: positionPermissionToForm(node.positionPermission),
+    members: isLeaf ? memberFieldsToForm(node.members, true) : undefined,
   };
+}
+
+function PositionPermissionFields({
+  namePath,
+  groupOptions,
+  ancestorOptions,
+}: {
+  namePath: NamePath;
+  groupOptions: Array<{ value: string; label: string }>;
+  ancestorOptions: AncestorOption[];
+}) {
+  const versionName =
+    Array.isArray(namePath) ? [...namePath, 'permissionGroupVersionId'] : [namePath, 'permissionGroupVersionId'];
+  const includeSelfName =
+    Array.isArray(namePath) ? [...namePath, 'includeSelf'] : [namePath, 'includeSelf'];
+  const parentScopesName =
+    Array.isArray(namePath) ? [...namePath, 'parentScopeKeys'] : [namePath, 'parentScopeKeys'];
+
+  return (
+    <Card size="small" title="Phân quyền vị trí" style={{ marginBottom: 12 }}>
+      <Form.Item name={versionName} label="Nhóm quyền">
+        <Select
+          allowClear
+          placeholder="Chọn nhóm quyền"
+          options={groupOptions}
+        />
+      </Form.Item>
+      <Form.Item name={includeSelfName} valuePropName="checked" initialValue={true}>
+        <Checkbox>Chỉ cá nhân</Checkbox>
+      </Form.Item>
+      {ancestorOptions.length > 0 && (
+        <Form.Item name={parentScopesName} label="Phạm vi cấp trên">
+          <Checkbox.Group
+            style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+            options={ancestorOptions.map((a) => ({
+              value: `${a.type}:${a.id}`,
+              label: `${scopeTypeLabel(a.type)}: ${a.name}`,
+            }))}
+          />
+        </Form.Item>
+      )}
+    </Card>
+  );
 }
 
 function MembersFormList({
   withLinkedProfile,
+  withPositionPermission,
   users,
+  groupOptions,
+  ancestorOptions,
 }: {
   withLinkedProfile?: boolean;
+  withPositionPermission?: boolean;
   users: UserOption[];
+  groupOptions?: Array<{ value: string; label: string }>;
+  ancestorOptions?: AncestorOption[];
 }) {
   return (
     <Form.List name="members">
@@ -223,6 +422,9 @@ function MembersFormList({
           <Typography.Text strong>Danh sách thành viên</Typography.Text>
           {fields.map(({ key, name, ...restField }) => (
             <Card key={key} size="small" style={{ marginTop: 8 }}>
+              <Form.Item {...restField} name={[name, 'id']} hidden>
+                <Input />
+              </Form.Item>
               <Row gutter={8}>
                 <Col span={12}>
                   <Form.Item
@@ -270,6 +472,15 @@ function MembersFormList({
                     <Input.TextArea rows={2} />
                   </Form.Item>
                 </Col>
+                {withPositionPermission && groupOptions && (
+                  <Col span={24}>
+                    <PositionPermissionFields
+                      namePath={[name, 'positionPermission']}
+                      groupOptions={groupOptions}
+                      ancestorOptions={ancestorOptions ?? []}
+                    />
+                  </Col>
+                )}
                 <Col span={24}>
                   <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(name)}>
                     Xóa thành viên
@@ -306,6 +517,9 @@ function EmployeesViewList({ members }: { members?: OrgMember[] }) {
             <Descriptions.Item label="Số điện thoại">{displayText(m.phone)}</Descriptions.Item>
             <Descriptions.Item label="Email">{displayText(m.email)}</Descriptions.Item>
             <Descriptions.Item label="Thông tin thêm">{displayText(m.additionalInfo)}</Descriptions.Item>
+            <Descriptions.Item label="Phân quyền vị trí">
+              {formatPositionPermissionSummary(m.positionPermission)}
+            </Descriptions.Item>
           </Descriptions>
         ),
       }))}
@@ -352,6 +566,7 @@ export function OrganizationPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [permissionGroups, setPermissionGroups] = useState<PermissionGroupOption[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [employeeModalOpen, setEmployeeModalOpen] = useState(false);
   const [form] = Form.useForm();
@@ -383,22 +598,43 @@ export function OrganizationPage() {
     setUsers(data.items);
   }, []);
 
+  const loadPermissionGroups = useCallback(async () => {
+    const { data } = await api.get<PermissionGroupOption[]>('/permission-groups');
+    setPermissionGroups(data);
+  }, []);
+
   useEffect(() => {
     loadTree();
     loadUsers();
-  }, [loadTree, loadUsers]);
+    loadPermissionGroups();
+  }, [loadTree, loadUsers, loadPermissionGroups]);
 
   useEffect(() => {
     setIsEditing(false);
-    if (!selected) {
+    if (!selected || selected.member) {
       form.resetFields();
       return;
     }
     form.setFieldsValue(nodeToFormValues(selected.data));
   }, [selected, form]);
 
+  const permissionGroupOptions = useMemo(
+    () =>
+      permissionGroups.flatMap((g) => {
+        const defaultVersion = g.versions.find((v) => !v.isCustom);
+        return defaultVersion ? [{ value: defaultVersion.id, label: g.name }] : [];
+      }),
+    [permissionGroups],
+  );
+
+  const selectedAncestorOptions = useMemo(() => {
+    if (!treeData || !selected) return [];
+    return getAncestorOptions(treeData, nodeKey(selected));
+  }, [treeData, selected]);
+
   const canUpdateSelected =
     !!selected &&
+    !selected.member &&
     ((selected.type === OrgNodeType.ORGANIZATION &&
       hasPermission(Permissions.ORGANIZATION_MANAGE)) ||
       (selected.type === OrgNodeType.COMPANY && hasPermission(Permissions.COMPANY_UPDATE)) ||
@@ -427,140 +663,175 @@ export function OrganizationPage() {
 
   const canReorderSelected =
     !!selected &&
+    !selected.member &&
     (selected.type === OrgNodeType.COMPANY || selected.type === OrgNodeType.UNIT) &&
     hasPermission(Permissions.ORG_UNIT_MOVE);
 
   const isLeafUnit =
-    selected?.type === OrgNodeType.UNIT && selected.data.childCount === 0;
+    selected?.type === OrgNodeType.UNIT &&
+    !selected.member &&
+    (selected.data.isLeaf ?? selected.data.childCount === 0);
 
   const canDeleteUnit =
     selected?.type === OrgNodeType.UNIT &&
-    selected.data.childCount === 0 &&
+    !selected.member &&
+    (selected.data.isLeaf ?? selected.data.childCount === 0) &&
     (selected.data.members?.length ?? 0) === 0;
 
   const canShowAddUnit =
     !!selected &&
+    !selected.member &&
     !isEditing &&
     hasPermission(Permissions.ORG_UNIT_CREATE) &&
     (selected.type === OrgNodeType.COMPANY ||
       (selected.type === OrgNodeType.UNIT && (selected.data.members?.length ?? 0) === 0));
 
-  const renderPanelExtra = () => {
-    if (!selected) return null;
+  const renderReorderButtons = () => {
+    if (!canReorderSelected || isEditing || !siblingInfo) return null;
+    const canMoveUp = siblingInfo.index > 0;
+    const canMoveDown = siblingInfo.index < siblingInfo.total - 1;
+    return (
+      <Space size={4}>
+        <Button
+          size="small"
+          icon={<ArrowUpOutlined />}
+          title="Lên trên"
+          disabled={!canMoveUp}
+          onClick={() => handleReorder('up')}
+        />
+        <Button
+          size="small"
+          icon={<ArrowDownOutlined />}
+          title="Xuống dưới"
+          disabled={!canMoveDown}
+          onClick={() => handleReorder('down')}
+        />
+      </Space>
+    );
+  };
 
-    const showReorder = canReorderSelected && !isEditing && siblingInfo;
-    const canMoveUp = !!siblingInfo && siblingInfo.index > 0;
-    const canMoveDown = !!siblingInfo && siblingInfo.index < siblingInfo.total - 1;
+  const renderPanelExtra = () => {
+    if (!selected || selected.member) return null;
 
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
-          justifyContent: 'flex-end',
-          width: '100%',
-        }}
-      >
-        <Space wrap size={4}>
-          {selected.type === OrgNodeType.ORGANIZATION &&
-            hasPermission(Permissions.COMPANY_CREATE) &&
-            !isEditing && (
-              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleAddCompany}>
-                Thêm công ty
-              </Button>
-            )}
-          {isLeafUnit && hasPermission(Permissions.ORG_UNIT_UPDATE) && !isEditing && (
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setEmployeeModalOpen(true)}>
-              Thêm nhân viên
+      <Space wrap size={4}>
+        {selected.type === OrgNodeType.ORGANIZATION &&
+          hasPermission(Permissions.COMPANY_CREATE) &&
+          !isEditing && (
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleAddCompany}>
+              Thêm công ty
             </Button>
           )}
-          {canShowAddUnit && (
-            <Button size="small" icon={<PlusOutlined />} onClick={handleAddUnit}>
-              Thêm đơn vị
-            </Button>
-          )}
-          {canUpdateSelected && !isEditing && (
-            <Button size="small" icon={<EditOutlined />} title="Sửa" onClick={() => setIsEditing(true)}>
-              Sửa
-            </Button>
-          )}
-          {selected.type === OrgNodeType.COMPANY && hasPermission(Permissions.COMPANY_DELETE) && (
+        {isLeafUnit && hasPermission(Permissions.ORG_UNIT_UPDATE) && !isEditing && (
+          <Button size="small" icon={<PlusOutlined />} onClick={() => setEmployeeModalOpen(true)}>
+            Thêm nhân viên
+          </Button>
+        )}
+        {canShowAddUnit && (
+          <Button size="small" icon={<PlusOutlined />} onClick={handleAddUnit}>
+            Thêm đơn vị
+          </Button>
+        )}
+        {canUpdateSelected && !isEditing && (
+          <Button size="small" icon={<EditOutlined />} title="Sửa" onClick={() => setIsEditing(true)} />
+        )}
+        {selected.type === OrgNodeType.COMPANY && hasPermission(Permissions.COMPANY_DELETE) && (
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            title="Xóa"
+            onClick={handleDelete}
+          />
+        )}
+        {selected.type === OrgNodeType.UNIT &&
+          hasPermission(Permissions.ORG_UNIT_DELETE) &&
+          canDeleteUnit && (
             <Button
               size="small"
               danger
               icon={<DeleteOutlined />}
               title="Xóa"
               onClick={handleDelete}
-            >
-              Xóa
-            </Button>
+            />
           )}
-          {selected.type === OrgNodeType.UNIT &&
-            hasPermission(Permissions.ORG_UNIT_DELETE) &&
-            canDeleteUnit && (
-              <Button
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                title="Xóa"
-                onClick={handleDelete}
-              >
-                Xóa
-              </Button>
-            )}
-        </Space>
-        {showReorder && (
-          <Space size={4} style={{ marginLeft: 8, flexShrink: 0 }}>
-            <Button
-              size="small"
-              icon={<ArrowUpOutlined />}
-              title="Lên trên"
-              disabled={!canMoveUp}
-              onClick={() => handleReorder('up')}
-            />
-            <Button
-              size="small"
-              icon={<ArrowDownOutlined />}
-              title="Xuống dưới"
-              disabled={!canMoveDown}
-              onClick={() => handleReorder('down')}
-            />
-          </Space>
-        )}
-      </div>
+      </Space>
     );
   };
 
   const handleSelect = (_keys: React.Key[], info: { node: DataNode }) => {
     const key = String(info.node.key);
-    const [type, id] = key.split(':');
     if (!treeData) return;
+
+    if (key.startsWith(UNIT_MEMBER_KEY_PREFIX)) {
+      const memberId = key.slice(UNIT_MEMBER_KEY_PREFIX.length);
+      const found = findUnitMemberInTree(treeData, memberId);
+      if (!found) return;
+      setIsEditing(false);
+      setSelected({
+        type: OrgNodeType.UNIT,
+        id: found.unit.id,
+        data: found.unit,
+        member: found.member,
+      });
+      return;
+    }
+
+    const [type, id] = key.split(':');
     const data = findNodeInTree(treeData, key);
     if (!data) return;
     setIsEditing(false);
     setSelected({ type: type as OrgNodeType, id, data });
   };
 
-  const refreshSelection = async (type: OrgNodeType, id: string) => {
+  const refreshSelection = async (type: OrgNodeType, id: string, memberId?: string) => {
     const tree = await loadTree(search || undefined);
     if (!tree) return;
     const updated = findNodeInTree(tree, nodeKey({ type, id }));
-    if (updated) {
-      setSelected({ type, id, data: updated });
+    if (!updated) return;
+    if (memberId) {
+      const member = updated.members?.find((m) => m.id === memberId);
+      setSelected({
+        type,
+        id,
+        data: updated,
+        member: member ?? undefined,
+      });
+      return;
     }
+    setSelected({ type, id, data: updated });
   };
 
   const handleSave = async (values: Record<string, unknown>) => {
     if (!selected) return;
     try {
+      const payload: Record<string, unknown> = {
+        ...values,
+        positionPermission: positionPermissionToPayload(
+          values.positionPermission as PositionPermissionFormValue | undefined,
+        ),
+      };
+      if (Array.isArray(values.members) && selected.type === OrgNodeType.UNIT && isLeafUnit) {
+        payload.members = (values.members as Array<Record<string, unknown>>).map((m) => ({
+          ...m,
+          positionPermission: positionPermissionToPayload(
+            m.positionPermission as PositionPermissionFormValue | undefined,
+          ),
+        }));
+      } else if (selected.type === OrgNodeType.UNIT && !isLeafUnit) {
+        delete payload.members;
+      } else if (Array.isArray(values.members)) {
+        payload.members = (values.members as Array<Record<string, unknown>>).map((m) => {
+          const { positionPermission: _pp, ...rest } = m;
+          return rest;
+        });
+      }
       if (selected.type === OrgNodeType.ORGANIZATION) {
-        await api.patch('/organization', values);
+        await api.patch('/organization', payload);
       } else if (selected.type === OrgNodeType.COMPANY) {
-        await api.patch(`/organization/companies/${selected.id}`, values);
+        await api.patch(`/organization/companies/${selected.id}`, payload);
       } else {
-        await api.patch(`/organization/units/${selected.id}`, values);
+        await api.patch(`/organization/units/${selected.id}`, payload);
       }
       message.success('Lưu thành công');
       setIsEditing(false);
@@ -646,10 +917,19 @@ export function OrganizationPage() {
 
   const handleAddEmployee = async (values: Record<string, unknown>) => {
     if (!selected || selected.type !== OrgNodeType.UNIT) return;
-    const currentMembers = memberFieldsToForm(selected.data.members);
+    const currentMembers = memberFieldsToForm(selected.data.members, true).map((m) => ({
+      ...m,
+      positionPermission: positionPermissionToPayload(m.positionPermission),
+    }));
+    const newMember = {
+      ...values,
+      positionPermission: positionPermissionToPayload(
+        values.positionPermission as PositionPermissionFormValue | undefined,
+      ),
+    };
     try {
       await api.patch(`/organization/units/${selected.id}`, {
-        members: [...currentMembers, values],
+        members: [...currentMembers, newMember],
       });
       message.success('Đã thêm nhân viên');
       setEmployeeModalOpen(false);
@@ -675,10 +955,15 @@ export function OrganizationPage() {
           <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
             <Select allowClear placeholder="Chọn user hệ thống" options={userOptions} />
           </Form.Item>
+          <PositionPermissionFields
+            namePath="positionPermission"
+            groupOptions={permissionGroupOptions}
+            ancestorOptions={selectedAncestorOptions}
+          />
           <Form.Item name="additionalInfo" label="Thông tin thêm">
             <Input.TextArea rows={3} />
           </Form.Item>
-          <MembersFormList users={users} />
+          <MembersFormList withLinkedProfile users={users} />
         </>
       );
     }
@@ -700,6 +985,11 @@ export function OrganizationPage() {
           <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
             <Select allowClear placeholder="Chọn user hệ thống" options={userOptions} />
           </Form.Item>
+          <PositionPermissionFields
+            namePath="positionPermission"
+            groupOptions={permissionGroupOptions}
+            ancestorOptions={selectedAncestorOptions}
+          />
           <Form.Item name="phone" label="Số điện thoại">
             <Input />
           </Form.Item>
@@ -729,6 +1019,11 @@ export function OrganizationPage() {
         <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
           <Select allowClear placeholder="Chọn user hệ thống" options={userOptions} />
         </Form.Item>
+        <PositionPermissionFields
+          namePath="positionPermission"
+          groupOptions={permissionGroupOptions}
+          ancestorOptions={selectedAncestorOptions}
+        />
         <Form.Item name="status" label="Trạng thái" rules={[{ required: true }]}>
           <Select
             options={[
@@ -740,12 +1035,46 @@ export function OrganizationPage() {
         <Form.Item name="additionalInfo" label="Thông tin thêm">
           <Input.TextArea rows={3} />
         </Form.Item>
+        {isLeafUnit && (
+          <MembersFormList
+            withLinkedProfile
+            withPositionPermission
+            users={users}
+            groupOptions={permissionGroupOptions}
+            ancestorOptions={selectedAncestorOptions}
+          />
+        )}
       </>
     );
   };
 
   const renderViewPanel = () => {
     if (!selected) return null;
+
+    if (selected.member) {
+      const m = selected.member;
+      return (
+        <div data-testid="unit-member-detail">
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label="Chức vụ">{m.position}</Descriptions.Item>
+            <Descriptions.Item label="Tên nhân viên">
+              <Typography.Text strong>{m.memberName}</Typography.Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Đơn vị">{selected.data.name}</Descriptions.Item>
+            <Descriptions.Item label="Hồ sơ liên kết">
+              {linkedUserLabel(m.linkedProfileUserId, m.linkedProfileName)}
+            </Descriptions.Item>
+            <Descriptions.Item label="Số điện thoại">{displayText(m.phone)}</Descriptions.Item>
+            <Descriptions.Item label="Email">{displayText(m.email)}</Descriptions.Item>
+            <Descriptions.Item label="Thông tin thêm">{displayText(m.additionalInfo)}</Descriptions.Item>
+            <Descriptions.Item label="Phân quyền vị trí">
+              {formatPositionPermissionSummary(m.positionPermission)}
+            </Descriptions.Item>
+          </Descriptions>
+        </div>
+      );
+    }
+
     const d = selected.data;
     if (selected.type === OrgNodeType.ORGANIZATION) {
       return (
@@ -756,12 +1085,15 @@ export function OrganizationPage() {
             <Descriptions.Item label="Hồ sơ liên kết">
               {linkedUserLabel(d.linkedProfileUserId, d.linkedProfileName)}
             </Descriptions.Item>
+            <Descriptions.Item label="Phân quyền vị trí">
+              {formatPositionPermissionSummary(d.positionPermission)}
+            </Descriptions.Item>
             <Descriptions.Item label="Thông tin thêm">{displayText(d.additionalInfo)}</Descriptions.Item>
           </Descriptions>
           <Typography.Title level={5} style={{ marginTop: 16 }}>
             Danh sách thành viên
           </Typography.Title>
-          <MembersViewList members={d.members} />
+          <MembersViewList members={d.members} withLinkedProfile />
         </>
       );
     }
@@ -775,6 +1107,9 @@ export function OrganizationPage() {
             <Descriptions.Item label="Người đại diện">{displayText(d.representativeName)}</Descriptions.Item>
             <Descriptions.Item label="Hồ sơ liên kết">
               {linkedUserLabel(d.linkedProfileUserId, d.linkedProfileName)}
+            </Descriptions.Item>
+            <Descriptions.Item label="Phân quyền vị trí">
+              {formatPositionPermissionSummary(d.positionPermission)}
             </Descriptions.Item>
             <Descriptions.Item label="Số điện thoại">{displayText(d.phone)}</Descriptions.Item>
             <Descriptions.Item label="Email">{displayText(d.email)}</Descriptions.Item>
@@ -794,6 +1129,9 @@ export function OrganizationPage() {
           <Descriptions.Item label="Người phụ trách">{displayManagerName(d.managerName)}</Descriptions.Item>
           <Descriptions.Item label="Hồ sơ liên kết">
             {linkedUserLabel(d.linkedProfileUserId, d.linkedProfileName)}
+          </Descriptions.Item>
+          <Descriptions.Item label="Phân quyền vị trí">
+            {formatPositionPermissionSummary(d.positionPermission)}
           </Descriptions.Item>
           <Descriptions.Item label="Trạng thái">{statusTag(d.status)}</Descriptions.Item>
           <Descriptions.Item label="Thông tin thêm">{displayText(d.additionalInfo)}</Descriptions.Item>
@@ -819,6 +1157,14 @@ export function OrganizationPage() {
         </Space>
       );
     }
+    if (selected.member) {
+      return (
+        <Space size={8} align="center" wrap>
+          <UserOutlined />
+          <span>Chi tiết chức vụ</span>
+        </Space>
+      );
+    }
     const icon =
       selected.type === OrgNodeType.ORGANIZATION ? (
         <ApartmentOutlined />
@@ -828,9 +1174,10 @@ export function OrganizationPage() {
         <ClusterOutlined />
       );
     return (
-      <Space>
+      <Space size={8} align="center" wrap>
         {icon}
-        {selected.type === OrgNodeType.ORGANIZATION ? 'Tổ chức' : 'Chi tiết'}
+        <span>{selected.type === OrgNodeType.ORGANIZATION ? 'Tổ chức' : 'Chi tiết'}</span>
+        {renderReorderButtons()}
       </Space>
     );
   };
@@ -881,7 +1228,9 @@ export function OrganizationPage() {
             <OrganizationIoActions
               canExport={hasPermission(Permissions.ORGANIZATION_VIEW)}
               canImport={hasPermission(Permissions.ORGANIZATION_MANAGE)}
-              onApplied={() => loadTree(search || undefined)}
+              onApplied={() => {
+                void loadTree(search || undefined);
+              }}
             />
           </Space>
         }
@@ -902,6 +1251,15 @@ export function OrganizationPage() {
                   blockNode
                   expandedKeys={expandedKeys}
                   onExpand={(keys) => setExpandedKeys(keys.map(String))}
+                  selectedKeys={
+                    selected
+                      ? [
+                          selected.member
+                            ? unitMemberKey(selected.member.id)
+                            : nodeKey(selected),
+                        ]
+                      : []
+                  }
                   treeData={antTreeData}
                   onSelect={handleSelect}
                 />
@@ -935,7 +1293,7 @@ export function OrganizationPage() {
               extra={renderPanelExtra()}
             >
               {selected ? (
-                isEditing ? (
+                isEditing && !selected.member ? (
                   <Form form={form} layout="vertical" onFinish={handleSave}>
                     {renderEditForm()}
                     <Space style={{ width: '100%', marginTop: 16 }}>
@@ -1002,6 +1360,11 @@ export function OrganizationPage() {
           <Form.Item name="additionalInfo" label="Thông tin thêm">
             <Input.TextArea rows={2} />
           </Form.Item>
+          <PositionPermissionFields
+            namePath="positionPermission"
+            groupOptions={permissionGroupOptions}
+            ancestorOptions={selectedAncestorOptions}
+          />
         </Form>
       </Modal>
     </div>

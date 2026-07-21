@@ -6,9 +6,10 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { AuthTokens, JwtPayload, PermissionCode } from '@erp/shared';
+import { AuthTokens, JwtPayload, OrgScopeNode, PermissionCode } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/auth.dto';
+import { PositionPermissionsService } from '../organization/position-permissions.service';
 
 @Injectable()
 export class AuthService {
@@ -16,26 +17,24 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private positionPermissions: PositionPermissionsService,
   ) {}
 
-  async login(dto: LoginDto): Promise<AuthTokens & { user: { id: string; email: string; fullName: string; permissions: PermissionCode[] } }> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-      include: {
-        roles: {
-          include: {
-            role: {
-              include: {
-                permissions: {
-                  include: { permission: true },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
+  async login(
+    dto: LoginDto,
+  ): Promise<
+    AuthTokens & {
+      user: {
+        id: string;
+        email: string;
+        fullName: string;
+        permissions: PermissionCode[];
+        isSystemAdmin: boolean;
+        orgScopes: OrgScopeNode[];
+      };
+    }
+  > {
+    const user = await this.findUserForLogin(dto);
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -45,11 +44,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const permissions = this.extractPermissions(user);
+    const auth = await this.positionPermissions.resolveAuthContext(user.id);
     const tokens = await this.generateTokens({
       sub: user.id,
       email: user.email,
-      permissions,
+      permissions: auth.permissions,
+      isSystemAdmin: auth.isSystemAdmin,
+      orgScopes: auth.orgScopes,
     });
 
     return {
@@ -58,7 +59,9 @@ export class AuthService {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
-        permissions,
+        permissions: auth.permissions,
+        isSystemAdmin: auth.isSystemAdmin,
+        orgScopes: auth.orgScopes,
       },
     };
   }
@@ -71,30 +74,19 @@ export class AuthService {
 
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        include: {
-          roles: {
-            include: {
-              role: {
-                include: {
-                  permissions: {
-                    include: { permission: true },
-                  },
-                },
-              },
-            },
-          },
-        },
       });
 
       if (!user || !user.isActive) {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
-      const permissions = this.extractPermissions(user);
+      const auth = await this.positionPermissions.resolveAuthContext(user.id);
       return this.generateTokens({
         sub: user.id,
         email: user.email,
-        permissions,
+        permissions: auth.permissions,
+        isSystemAdmin: auth.isSystemAdmin,
+        orgScopes: auth.orgScopes,
       });
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
@@ -104,29 +96,19 @@ export class AuthService {
   async validateUserPayload(payload: JwtPayload) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: {
-        roles: {
-          include: {
-            role: {
-              include: {
-                permissions: {
-                  include: { permission: true },
-                },
-              },
-            },
-          },
-        },
-      },
     });
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User not found or inactive');
     }
 
+    const auth = await this.positionPermissions.resolveAuthContext(user.id);
     return {
       id: user.id,
       email: user.email,
-      permissions: this.extractPermissions(user),
+      permissions: auth.permissions,
+      isSystemAdmin: auth.isSystemAdmin,
+      orgScopes: auth.orgScopes,
     };
   }
 
@@ -143,6 +125,61 @@ export class AuthService {
     }
   }
 
+  async ensureEmployeeCodeAvailable(employeeCode: string, excludeUserId?: string) {
+    const existing = await this.prisma.user.findUnique({
+      where: { employeeCode },
+    });
+    if (existing && existing.id !== excludeUserId) {
+      throw new ConflictException('Employee code already exists');
+    }
+  }
+
+  async ensurePhoneAvailable(phone: string, excludeUserId?: string) {
+    const existing = await this.prisma.user.findUnique({
+      where: { phone },
+    });
+    if (existing && existing.id !== excludeUserId) {
+      throw new ConflictException('Phone already exists');
+    }
+  }
+
+  private async findUserForLogin(dto: LoginDto) {
+    const identifier = dto.identifier.trim();
+    const loginField = this.detectLoginField(identifier);
+
+    switch (loginField) {
+      case 'email':
+        return this.prisma.user.findUnique({
+          where: { email: identifier.toLowerCase() },
+        });
+      case 'phone':
+        return this.prisma.user.findUnique({
+          where: { phone: this.normalizePhone(identifier) },
+        });
+      case 'employeeCode':
+        return this.prisma.user.findUnique({
+          where: { employeeCode: identifier },
+        });
+    }
+  }
+
+  private detectLoginField(identifier: string): 'email' | 'phone' | 'employeeCode' {
+    if (identifier.includes('@')) {
+      return 'email';
+    }
+
+    const normalized = this.normalizePhone(identifier);
+    if (/^\+?\d{9,15}$/.test(normalized)) {
+      return 'phone';
+    }
+
+    return 'employeeCode';
+  }
+
+  private normalizePhone(phone: string): string {
+    return phone.replace(/[\s\-().]/g, '');
+  }
+
   private async generateTokens(payload: JwtPayload): Promise<AuthTokens> {
     const accessToken = await this.jwtService.signAsync(payload, {
       expiresIn: 900,
@@ -151,21 +188,5 @@ export class AuthService {
       expiresIn: 604800,
     });
     return { accessToken, refreshToken };
-  }
-
-  private extractPermissions(user: {
-    roles: Array<{
-      role: {
-        permissions: Array<{ permission: { code: string } }>;
-      };
-    }>;
-  }): PermissionCode[] {
-    const codes = new Set<PermissionCode>();
-    for (const userRole of user.roles) {
-      for (const rp of userRole.role.permissions) {
-        codes.add(rp.permission.code as PermissionCode);
-      }
-    }
-    return Array.from(codes);
   }
 }

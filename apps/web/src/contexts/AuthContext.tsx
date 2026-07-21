@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { PermissionCode } from '@erp/shared';
+import { OrgScopeNode, PermissionCode } from '@erp/shared';
 import { api } from '../lib/api';
 
 interface AuthUser {
@@ -15,12 +15,19 @@ interface AuthUser {
   email: string;
   fullName?: string;
   permissions: PermissionCode[];
+  isSystemAdmin?: boolean;
+  orgScopes?: OrgScopeNode[];
+}
+
+export interface LoginCredentials {
+  identifier: string;
+  password: string;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => void;
   hasPermission: (permission: PermissionCode) => boolean;
 }
@@ -55,8 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchMe();
   }, [fetchMe]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const { data } = await api.post('/auth/login', { email, password });
+  const login = useCallback(async (credentials: LoginCredentials) => {
+    const { data } = await api.post('/auth/login', credentials);
     localStorage.setItem('accessToken', data.accessToken);
     localStorage.setItem('refreshToken', data.refreshToken);
     setUser(data.user);

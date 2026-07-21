@@ -16,7 +16,7 @@ describe('Setup / Permissions (e2e)', () => {
 
     const login = await request(getHttpServer(app))
       .post('/api/auth/login')
-      .send({ email: 'admin@hyperlabs.vn', password: 'Admin@123' });
+      .send({ identifier: 'admin@hyperlabs.vn', password: 'Admin@123' });
 
     accessToken = login.body.accessToken;
 

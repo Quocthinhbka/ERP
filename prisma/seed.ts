@@ -95,6 +95,30 @@ const PERMISSION_DEFINITIONS: Array<{
     description: 'Gán quyền cho vai trò',
   },
   {
+    code: Permissions.PERMISSION_GROUP_VIEW,
+    name: 'Xem nhóm quyền',
+    module: PermissionModule.PERMISSION_GROUP,
+    description: 'Xem danh sách nhóm quyền',
+  },
+  {
+    code: Permissions.PERMISSION_GROUP_CREATE,
+    name: 'Tạo nhóm quyền',
+    module: PermissionModule.PERMISSION_GROUP,
+    description: 'Tạo nhóm quyền mới',
+  },
+  {
+    code: Permissions.PERMISSION_GROUP_UPDATE,
+    name: 'Cập nhật nhóm quyền',
+    module: PermissionModule.PERMISSION_GROUP,
+    description: 'Cập nhật nhóm quyền',
+  },
+  {
+    code: Permissions.PERMISSION_GROUP_DELETE,
+    name: 'Xóa nhóm quyền',
+    module: PermissionModule.PERMISSION_GROUP,
+    description: 'Xóa nhóm quyền',
+  },
+  {
     code: Permissions.ORGANIZATION_VIEW,
     name: 'Xem tổ chức',
     module: PermissionModule.ORGANIZATION,
@@ -217,6 +241,9 @@ async function main() {
     Permissions.ROLE_UPDATE,
     Permissions.PERMISSION_VIEW,
     Permissions.PERMISSION_ASSIGN,
+    Permissions.PERMISSION_GROUP_VIEW,
+    Permissions.PERMISSION_GROUP_CREATE,
+    Permissions.PERMISSION_GROUP_UPDATE,
     Permissions.ORGANIZATION_VIEW,
     Permissions.ORGANIZATION_MANAGE,
     Permissions.COMPANY_VIEW,
@@ -262,6 +289,91 @@ async function main() {
   }
 
   const passwordHash = await bcrypt.hash('Admin@123', 10);
+
+  async function seedPermissionGroup(
+    code: string,
+    name: string,
+    permissionCodes: string[],
+    isDefault: boolean,
+  ) {
+    const group = await prisma.permissionGroup.upsert({
+      where: { code },
+      update: { name, isDefault },
+      create: { code, name, isDefault },
+    });
+
+    const groupPermissions = allPermissions.filter((p) =>
+      permissionCodes.includes(p.code),
+    );
+
+    await prisma.permissionGroupPermission.deleteMany({
+      where: { permissionGroupId: group.id },
+    });
+    if (groupPermissions.length > 0) {
+      await prisma.permissionGroupPermission.createMany({
+        data: groupPermissions.map((p) => ({
+          permissionGroupId: group.id,
+          permissionId: p.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    let version = await prisma.permissionGroupVersion.findFirst({
+      where: { permissionGroupId: group.id, versionNumber: 0 },
+    });
+    if (!version) {
+      version = await prisma.permissionGroupVersion.create({
+        data: {
+          permissionGroupId: group.id,
+          versionNumber: 0,
+          name: group.name,
+          isCustom: false,
+        },
+      });
+    } else {
+      await prisma.permissionGroupVersion.update({
+        where: { id: version.id },
+        data: { name: group.name },
+      });
+    }
+
+    await prisma.permissionGroupVersionPermission.deleteMany({
+      where: { versionId: version.id },
+    });
+    if (groupPermissions.length > 0) {
+      await prisma.permissionGroupVersionPermission.createMany({
+        data: groupPermissions.map((p) => ({
+          versionId: version.id,
+          permissionId: p.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    return { group, version };
+  }
+
+  const { version: adminGroupVersion } = await seedPermissionGroup(
+    'full_access',
+    'Quản trị đầy đủ',
+    ALL_PERMISSIONS,
+    true,
+  );
+
+  const basicUserCodes = [Permissions.SETUP_VIEW];
+  await seedPermissionGroup('basic_user', 'Người dùng cơ bản', basicUserCodes, true);
+
+  // Giải phóng unique employeeCode/phone nếu bị user khác chiếm trước khi upsert admin.
+  await prisma.user.updateMany({
+    where: { employeeCode: 'NV001', NOT: { email: 'admin@hyperlabs.vn' } },
+    data: { employeeCode: null },
+  });
+  await prisma.user.updateMany({
+    where: { phone: '0900000001', NOT: { email: 'admin@hyperlabs.vn' } },
+    data: { phone: null },
+  });
+
   const adminUser = await prisma.user.upsert({
     where: { email: 'admin@hyperlabs.vn' },
     update: {
@@ -269,6 +381,7 @@ async function main() {
       passwordHash,
       isActive: true,
       employeeCode: 'NV001',
+      phone: '0900000001',
     },
     create: {
       email: 'admin@hyperlabs.vn',
@@ -276,6 +389,7 @@ async function main() {
       passwordHash,
       isActive: true,
       employeeCode: 'NV001',
+      phone: '0900000001',
     },
   });
 
@@ -285,26 +399,35 @@ async function main() {
   });
 
   const existingOrg = await prisma.organization.findFirst();
+  let organizationId: string;
   if (existingOrg) {
     await prisma.organization.update({
       where: { id: existingOrg.id },
       data: {
         name: 'Tổ chức HyperLabs',
         representativeName: 'System Administrator',
+        linkedProfileUserId: adminUser.id,
         additionalInfo: 'Tổ chức mặc định',
       },
     });
+    organizationId = existingOrg.id;
   } else {
-    await prisma.organization.create({
+    const created = await prisma.organization.create({
       data: {
         name: 'Tổ chức HyperLabs',
         representativeName: 'System Administrator',
+        linkedProfileUserId: adminUser.id,
         additionalInfo: 'Tổ chức mặc định',
       },
     });
+    organizationId = created.id;
   }
 
-  console.log('Seed completed: permissions, roles, admin user, organization.');
+  // Admin hệ thống dùng role super_admin; không cần gắn nhóm quyền vào vị trí.
+  void adminGroupVersion;
+  void organizationId;
+
+  console.log('Seed completed: permissions, roles, permission groups, system admin, organization.');
 }
 
 main()

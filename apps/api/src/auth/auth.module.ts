@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { PositionPermissionsModule } from '../organization/position-permissions.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { JwtStrategy } from './jwt.strategy';
         },
       }),
     }),
+    PositionPermissionsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

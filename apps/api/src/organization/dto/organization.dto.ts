@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsIn,
@@ -10,7 +11,40 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { EntityStatus } from '@erp/shared';
+import { EntityStatus, OrgNodeType } from '@erp/shared';
+
+export class OrgScopeNodeDto {
+  @IsEnum(OrgNodeType)
+  type!: OrgNodeType;
+
+  @IsUUID()
+  id!: string;
+}
+
+export class PositionPermissionInputDto {
+  @IsOptional()
+  @IsUUID()
+  permissionGroupId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  permissionGroupVersionId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  permissionIds?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  includeSelf?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrgScopeNodeDto)
+  parentScopes?: OrgScopeNodeDto[];
+}
 
 export class OrganizationMemberDto {
   @IsOptional()
@@ -26,6 +60,10 @@ export class OrganizationMemberDto {
   memberName!: string;
 
   @IsOptional()
+  @IsUUID()
+  linkedProfileUserId?: string | null;
+
+  @IsOptional()
   @IsString()
   phone?: string;
 
@@ -38,13 +76,14 @@ export class OrganizationMemberDto {
   additionalInfo?: string;
 }
 
-export class CompanyMemberDto extends OrganizationMemberDto {
-  @IsOptional()
-  @IsUUID()
-  linkedProfileUserId?: string | null;
-}
+export class CompanyMemberDto extends OrganizationMemberDto {}
 
-export class UnitMemberDto extends CompanyMemberDto {}
+export class UnitMemberDto extends OrganizationMemberDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PositionPermissionInputDto)
+  positionPermission?: PositionPermissionInputDto | null;
+}
 
 export class UpdateOrganizationDto {
   @IsOptional()
@@ -69,6 +108,11 @@ export class UpdateOrganizationDto {
   @ValidateNested({ each: true })
   @Type(() => OrganizationMemberDto)
   members?: OrganizationMemberDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PositionPermissionInputDto)
+  positionPermission?: PositionPermissionInputDto | null;
 }
 
 export class CreateCompanyDto {
@@ -109,6 +153,11 @@ export class CreateCompanyDto {
   @ValidateNested({ each: true })
   @Type(() => CompanyMemberDto)
   members?: CompanyMemberDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PositionPermissionInputDto)
+  positionPermission?: PositionPermissionInputDto | null;
 }
 
 export class UpdateCompanyDto {
@@ -150,6 +199,11 @@ export class UpdateCompanyDto {
   @ValidateNested({ each: true })
   @Type(() => CompanyMemberDto)
   members?: CompanyMemberDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PositionPermissionInputDto)
+  positionPermission?: PositionPermissionInputDto | null;
 }
 
 export class CreateOrganizationUnitDto {
@@ -179,6 +233,11 @@ export class CreateOrganizationUnitDto {
   @IsOptional()
   @IsString()
   additionalInfo?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PositionPermissionInputDto)
+  positionPermission?: PositionPermissionInputDto | null;
 }
 
 export class UpdateOrganizationUnitDto {
@@ -208,6 +267,11 @@ export class UpdateOrganizationUnitDto {
   @ValidateNested({ each: true })
   @Type(() => UnitMemberDto)
   members?: UnitMemberDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PositionPermissionInputDto)
+  positionPermission?: PositionPermissionInputDto | null;
 }
 
 export class ReorderNodeDto {

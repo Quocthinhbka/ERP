@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto('/login');
-  await page.getByTestId('login-email').fill('admin@hyperlabs.vn');
+  await page.getByTestId('login-identifier').fill('admin@hyperlabs.vn');
   await page.getByTestId('login-password').fill('Admin@123');
   await page.getByTestId('login-submit').click();
   await expect(page.getByRole('heading', { name: 'Tổng quan' })).toBeVisible({ timeout: 10000 });

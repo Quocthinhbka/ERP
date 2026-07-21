@@ -266,12 +266,20 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
       path: '/setup/roles',
     });
   }
+  if (hasPermission(Permissions.PERMISSION_GROUP_VIEW)) {
+    permissionChildren.push({
+      key: 'nav-permission-groups',
+      icon: <SafetyCertificateOutlined />,
+      label: 'Nhóm quyền',
+      path: '/setup/permission-groups',
+    });
+  }
   if (hasPermission(Permissions.USER_VIEW)) {
     permissionChildren.push({
-      key: 'nav-users',
+      key: 'nav-accounts',
       icon: <TeamOutlined />,
-      label: 'Người dùng',
-      path: '/setup/users',
+      label: 'Tài khoản',
+      path: '/setup/accounts',
     });
   }
   if (hasPermission(Permissions.PERMISSION_VIEW)) {

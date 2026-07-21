@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { EntityStatus, OrgMember, OrgNodeType, OrgTreeNode } from '@erp/shared';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  EntityStatus,
+  OrgMember,
+  OrgNodeType,
+  OrgScopeNode,
+  OrgTreeNode,
+  PositionHolderKind,
+} from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { PositionPermissionsService } from './position-permissions.service';
 
 type UnitRow = {
   id: string;
@@ -27,13 +35,22 @@ type UnitRow = {
 
 @Injectable()
 export class OrganizationTreeService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private positionPermissions: PositionPermissionsService,
+  ) {}
 
-  async getTree(search?: string) {
+  async getTree(
+    search?: string,
+    scope?: { isSystemAdmin: boolean; orgScopes: OrgScopeNode[] },
+  ) {
     const org = await this.prisma.organization.findFirst({
       include: {
         linkedProfileUser: { select: { fullName: true } },
-        members: { orderBy: { sortOrder: 'asc' } },
+        members: {
+          orderBy: { sortOrder: 'asc' },
+          include: { linkedProfileUser: { select: { fullName: true } } },
+        },
         companies: {
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
           include: {
@@ -62,6 +79,21 @@ export class OrganizationTreeService {
       throw new NotFoundException('Organization not found');
     }
 
+    const holders: Array<{ holderKind: PositionHolderKind; holderId: string }> = [
+      { holderKind: PositionHolderKind.ORGANIZATION_REP, holderId: org.id },
+    ];
+    for (const company of org.companies) {
+      holders.push({ holderKind: PositionHolderKind.COMPANY_REP, holderId: company.id });
+      for (const unit of company.units) {
+        holders.push({ holderKind: PositionHolderKind.UNIT_MANAGER, holderId: unit.id });
+        for (const member of unit.members) {
+          holders.push({ holderKind: PositionHolderKind.UNIT_MEMBER, holderId: member.id });
+        }
+      }
+    }
+    const permissionMap =
+      await this.positionPermissions.getManyPositionPermissions(holders);
+
     const normalizedSearch = search?.trim().toLowerCase();
     const matchedKeys = new Set<string>();
 
@@ -73,10 +105,16 @@ export class OrganizationTreeService {
       linkedProfileUserId: org.linkedProfileUserId,
       linkedProfileName: org.linkedProfileUser?.fullName ?? null,
       additionalInfo: org.additionalInfo,
-      members: org.members.map((m) => this.mapOrgMember(m)),
+      positionPermission:
+        permissionMap.get(`${PositionHolderKind.ORGANIZATION_REP}:${org.id}`) ?? null,
+      members: org.members.map((m) => this.mapLinkedMember(m)),
       childCount: org.companies.length,
       children: org.companies.map((company) => {
-        const unitTree = this.buildUnitTree(company.units as UnitRow[], null);
+        const unitTree = this.buildUnitTree(
+          company.units as UnitRow[],
+          null,
+          permissionMap,
+        );
         const companyNode: OrgTreeNode = {
           id: company.id,
           type: OrgNodeType.COMPANY,
@@ -89,9 +127,11 @@ export class OrganizationTreeService {
           phone: company.phone,
           email: company.email,
           status: company.status as EntityStatus,
-          members: company.members.map((m) => this.mapCompanyMember(m)),
+          positionPermission:
+            permissionMap.get(`${PositionHolderKind.COMPANY_REP}:${company.id}`) ?? null,
+          members: company.members.map((m) => this.mapLinkedMember(m)),
           organizationId: org.id,
-          childCount: company.units.length,
+          childCount: unitTree.length,
           children: unitTree,
         };
         this.collectMatches(companyNode, normalizedSearch, matchedKeys);
@@ -101,17 +141,37 @@ export class OrganizationTreeService {
 
     this.collectMatches(orgNode, normalizedSearch, matchedKeys);
 
+    const filtered =
+      scope != null
+        ? this.positionPermissions.filterTreeByScope(
+            orgNode,
+            scope.isSystemAdmin,
+            scope.orgScopes,
+          )
+        : orgNode;
+
+    if (scope != null && !scope.isSystemAdmin && filtered == null) {
+      throw new ForbiddenException('Outside permitted organization scope');
+    }
+
     return {
-      tree: orgNode,
+      tree: filtered ?? orgNode,
       matchedKeys: Array.from(matchedKeys),
     };
   }
 
-  private buildUnitTree(units: UnitRow[], parentUnitId: string | null): OrgTreeNode[] {
+  private buildUnitTree(
+    units: UnitRow[],
+    parentUnitId: string | null,
+    permissionMap: Map<string, NonNullable<
+      Awaited<ReturnType<PositionPermissionsService['getPositionPermission']>>
+    >>,
+  ): OrgTreeNode[] {
     return units
       .filter((u) => u.parentUnitId === parentUnitId)
       .map((unit) => {
-        const children = this.buildUnitTree(units, unit.id);
+        const children = this.buildUnitTree(units, unit.id, permissionMap);
+        const isLeaf = unit._count.childUnits === 0;
         return {
           id: unit.id,
           type: OrgNodeType.UNIT,
@@ -123,20 +183,30 @@ export class OrganizationTreeService {
           additionalInfo: unit.additionalInfo,
           companyId: unit.companyId,
           parentUnitId: unit.parentUnitId,
-          childCount: unit._count.childUnits,
-          members: unit.members.map((m) => this.mapCompanyMember(m)),
+          childCount: children.length,
+          isLeaf,
+          positionPermission:
+            permissionMap.get(`${PositionHolderKind.UNIT_MANAGER}:${unit.id}`) ?? null,
+          members: unit.members.map((m) => ({
+            ...this.mapLinkedMember(m),
+            positionPermission: isLeaf
+              ? permissionMap.get(`${PositionHolderKind.UNIT_MEMBER}:${m.id}`) ?? null
+              : null,
+          })),
           children,
         };
       });
   }
 
-  private mapOrgMember(member: {
+  private mapLinkedMember(member: {
     id: string;
     position: string;
     memberName: string;
     phone: string | null;
     email: string | null;
     additionalInfo: string | null;
+    linkedProfileUserId?: string | null;
+    linkedProfileUser?: { fullName: string } | null;
   }): OrgMember {
     return {
       id: member.id,
@@ -145,27 +215,7 @@ export class OrganizationTreeService {
       phone: member.phone,
       email: member.email,
       additionalInfo: member.additionalInfo,
-    };
-  }
-
-  private mapCompanyMember(member: {
-    id: string;
-    position: string;
-    memberName: string;
-    phone: string | null;
-    email: string | null;
-    additionalInfo: string | null;
-    linkedProfileUserId: string | null;
-    linkedProfileUser: { fullName: string } | null;
-  }): OrgMember {
-    return {
-      id: member.id,
-      position: member.position,
-      memberName: member.memberName,
-      phone: member.phone,
-      email: member.email,
-      additionalInfo: member.additionalInfo,
-      linkedProfileUserId: member.linkedProfileUserId,
+      linkedProfileUserId: member.linkedProfileUserId ?? null,
       linkedProfileName: member.linkedProfileUser?.fullName ?? null,
     };
   }

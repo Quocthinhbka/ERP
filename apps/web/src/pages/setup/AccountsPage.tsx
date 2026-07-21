@@ -13,14 +13,18 @@ import {
   message,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { Link } from 'react-router';
 import { Permissions } from '@erp/shared';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 
-interface UserItem {
+interface AccountItem {
   id: string;
   email: string;
   fullName: string;
+  employeeCode: string | null;
+  phone: string | null;
+  linkedEmployeeProfileId: string | null;
   isActive: boolean;
   roles: Array<{ id: string; code: string; name: string }>;
 }
@@ -31,23 +35,23 @@ interface RoleOption {
   name: string;
 }
 
-export function UsersPage() {
+export function AccountsPage() {
   const { hasPermission } = useAuth();
-  const [users, setUsers] = useState<UserItem[]>([]);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<UserItem | null>(null);
+  const [editingAccount, setEditingAccount] = useState<AccountItem | null>(null);
   const [form] = Form.useForm();
 
   const loadData = async () => {
     setLoading(true);
     try {
       const [usersRes, rolesRes] = await Promise.all([
-        api.get<{ items: UserItem[] }>('/users'),
+        api.get<{ items: AccountItem[] }>('/users'),
         api.get<RoleOption[]>('/roles'),
       ]);
-      setUsers(usersRes.data.items);
+      setAccounts(usersRes.data.items);
       setRoles(rolesRes.data);
     } finally {
       setLoading(false);
@@ -59,35 +63,32 @@ export function UsersPage() {
   }, []);
 
   const openCreate = () => {
-    setEditingUser(null);
+    setEditingAccount(null);
     form.resetFields();
     setModalOpen(true);
   };
 
-  const openEdit = (user: UserItem) => {
-    setEditingUser(user);
+  const openEdit = (account: AccountItem) => {
+    setEditingAccount(account);
     form.setFieldsValue({
-      fullName: user.fullName,
-      isActive: user.isActive,
-      roleIds: user.roles.map((r) => r.id),
+      fullName: account.fullName,
+      email: account.email,
+      employeeCode: account.employeeCode,
+      phone: account.phone,
+      isActive: account.isActive,
+      roleIds: account.roles.map((r) => r.id),
     });
     setModalOpen(true);
   };
 
-  const handleSubmit = async (values: {
-    email?: string;
-    password?: string;
-    fullName: string;
-    isActive?: boolean;
-    roleIds: string[];
-  }) => {
+  const handleSubmit = async (values: Record<string, unknown>) => {
     try {
-      if (editingUser) {
-        await api.patch(`/users/${editingUser.id}`, values);
-        message.success('Cập nhật người dùng thành công');
+      if (editingAccount) {
+        await api.patch(`/users/${editingAccount.id}`, values);
+        message.success('Cập nhật tài khoản thành công');
       } else {
         await api.post('/users', values);
-        message.success('Tạo người dùng thành công');
+        message.success('Tạo tài khoản thành công');
       }
       setModalOpen(false);
       loadData();
@@ -96,12 +97,12 @@ export function UsersPage() {
     }
   };
 
-  const handleDelete = async (user: UserItem) => {
+  const handleDelete = (account: AccountItem) => {
     Modal.confirm({
-      title: `Xóa người dùng "${user.email}"?`,
+      title: `Xóa tài khoản "${account.email}"?`,
       onOk: async () => {
-        await api.delete(`/users/${user.id}`);
-        message.success('Đã xóa người dùng');
+        await api.delete(`/users/${account.id}`);
+        message.success('Đã xóa tài khoản');
         loadData();
       },
     });
@@ -109,11 +110,11 @@ export function UsersPage() {
 
   return (
     <Card
-      title="Quản lý người dùng"
+      title="Quản lý tài khoản"
       extra={
         hasPermission(Permissions.USER_CREATE) && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            Thêm người dùng
+            Thêm tài khoản
           </Button>
         )
       }
@@ -121,24 +122,30 @@ export function UsersPage() {
       <Table
         rowKey="id"
         loading={loading}
-        dataSource={users}
+        dataSource={accounts}
         columns={[
+          { title: 'Mã NV', dataIndex: 'employeeCode', render: (v) => v ?? '—' },
+          { title: 'SĐT', dataIndex: 'phone', render: (v) => v ?? '—' },
           { title: 'Email', dataIndex: 'email' },
-          { title: 'Họ tên', dataIndex: 'fullName' },
+          {
+            title: 'Hồ sơ liên kết',
+            dataIndex: 'linkedEmployeeProfileId',
+            render: (v: string | null) =>
+              v ? <Tag color="green">Đã liên kết</Tag> : <Tag>Chưa có (HR)</Tag>,
+          },
           {
             title: 'Trạng thái',
             dataIndex: 'isActive',
-            render: (v: boolean) => (v ? <Tag color="green">Hoạt động</Tag> : <Tag color="red">Khóa</Tag>),
-          },
-          {
-            title: 'Vai trò',
-            dataIndex: 'roles',
-            render: (r: UserItem['roles']) => r.map((role) => <Tag key={role.id}>{role.name}</Tag>),
+            render: (v: boolean) =>
+              v ? <Tag color="green">Hoạt động</Tag> : <Tag color="red">Khóa</Tag>,
           },
           {
             title: 'Thao tác',
             render: (_, record) => (
               <Space>
+                <Link to={`/setup/accounts/${record.id}`}>
+                  <Button size="small">Xem chi tiết</Button>
+                </Link>
                 {hasPermission(Permissions.USER_UPDATE) && (
                   <Button size="small" onClick={() => openEdit(record)}>
                     Sửa
@@ -156,14 +163,15 @@ export function UsersPage() {
       />
 
       <Modal
-        title={editingUser ? 'Sửa người dùng' : 'Thêm người dùng'}
+        title={editingAccount ? 'Sửa tài khoản' : 'Thêm tài khoản'}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
         destroyOnHidden
+        width={520}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          {!editingUser && (
+          {!editingAccount && (
             <>
               <Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}>
                 <Input />
@@ -176,16 +184,24 @@ export function UsersPage() {
           <Form.Item name="fullName" label="Họ tên" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          {editingUser && (
-            <Form.Item name="isActive" label="Hoạt động" valuePropName="checked">
-              <Switch />
-            </Form.Item>
+          <Form.Item name="employeeCode" label="Mã nhân viên">
+            <Input />
+          </Form.Item>
+          <Form.Item name="phone" label="Số điện thoại">
+            <Input />
+          </Form.Item>
+          {editingAccount && (
+            <>
+              <Form.Item name="email" label="Email" rules={[{ type: 'email' }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="isActive" label="Hoạt động" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </>
           )}
           <Form.Item name="roleIds" label="Vai trò" rules={[{ required: true }]}>
-            <Select
-              mode="multiple"
-              options={roles.map((r) => ({ value: r.id, label: r.name }))}
-            />
+            <Select mode="multiple" options={roles.map((r) => ({ value: r.id, label: r.name }))} />
           </Form.Item>
         </Form>
       </Modal>
