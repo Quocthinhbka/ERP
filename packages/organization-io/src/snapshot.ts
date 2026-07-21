@@ -15,13 +15,13 @@ import {
 type PrismaLike = PrismaClient;
 
 function toLinkedProfile(user: {
-  employeeCode: string | null;
+  accountCode: string;
   email: string;
   fullName: string;
 } | null): LinkedProfileRef | null {
   if (!user) return null;
   return {
-    employeeCode: user.employeeCode,
+    accountCode: user.accountCode,
     email: user.email,
     fullName: user.fullName,
   };
@@ -49,27 +49,27 @@ export async function loadOrganizationSnapshot(
 ): Promise<OrganizationSnapshot> {
   const org = await prisma.organization.findFirst({
     include: {
-      linkedProfileUser: { select: { employeeCode: true, email: true, fullName: true } },
+      linkedProfileUser: { select: { accountCode: true, email: true, fullName: true } },
       members: { orderBy: { sortOrder: 'asc' } },
       companies: {
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
         include: {
-          linkedProfileUser: { select: { employeeCode: true, email: true, fullName: true } },
+          linkedProfileUser: { select: { accountCode: true, email: true, fullName: true } },
           members: {
             orderBy: { sortOrder: 'asc' },
             include: {
-              linkedProfileUser: { select: { employeeCode: true, email: true, fullName: true } },
+              linkedProfileUser: { select: { accountCode: true, email: true, fullName: true } },
             },
           },
           units: {
             orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
             include: {
-              linkedProfileUser: { select: { employeeCode: true, email: true, fullName: true } },
+              linkedProfileUser: { select: { accountCode: true, email: true, fullName: true } },
               members: {
                 orderBy: { sortOrder: 'asc' },
                 include: {
                   linkedProfileUser: {
-                    select: { employeeCode: true, email: true, fullName: true },
+                    select: { accountCode: true, email: true, fullName: true },
                   },
                 },
               },
@@ -201,11 +201,13 @@ export async function resolveLinkedUserId(
   context: string,
 ): Promise<string | null> {
   if (!linked) return null;
-  const code = linked.employeeCode?.trim();
+  const code = linked.accountCode?.trim();
   const email = linked.email?.trim()?.toLowerCase();
 
   if (code) {
-    const byCode = await prisma.user.findUnique({ where: { employeeCode: code } });
+    const byCode = await prisma.user.findUnique({
+      where: { accountCode: code.toUpperCase() },
+    });
     if (byCode) return byCode.id;
   }
   if (email) {
@@ -215,7 +217,7 @@ export async function resolveLinkedUserId(
 
   errors.push(
     `${context}: không tìm thấy hồ sơ liên kết` +
-      (code ? ` (mã NV: ${code})` : '') +
+      (code ? ` (mã TK: ${code})` : '') +
       (email ? ` (email: ${email})` : ''),
   );
   return null;

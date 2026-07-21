@@ -15,7 +15,7 @@ function normalize(value: unknown): string {
 function linkedKey(linked: unknown): string {
   if (!linked || typeof linked !== 'object') return '';
   const ref = linked as Record<string, unknown>;
-  return [ref.employeeCode ?? '', ref.email ?? '', ref.fullName ?? ''].join('|');
+  return [ref.accountCode ?? '', ref.email ?? '', ref.fullName ?? ''].join('|');
 }
 
 function pickComparable(row: Record<string, unknown>, fields: string[]): Record<string, unknown> {

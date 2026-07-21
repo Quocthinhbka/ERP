@@ -11,44 +11,23 @@ import {
   type OrganizationIoJobResult,
 } from '@erp/organization-io';
 
-export const DEMO_QUEUE_NAME = 'erp-demo';
-
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   private connection: Redis;
-  private demoQueue: Queue;
   private orgIoQueue: Queue;
 
   constructor(config: ConfigService) {
+    const password = config.get<string>('REDIS_PASSWORD');
     this.connection = new Redis({
       host: config.get<string>('REDIS_HOST', 'localhost'),
       port: config.get<number>('REDIS_PORT', 6380),
+      password: password || undefined,
       maxRetriesPerRequest: null,
     });
 
-    this.demoQueue = new Queue(DEMO_QUEUE_NAME, {
-      connection: this.connection,
-    });
     this.orgIoQueue = new Queue(ORG_IO_QUEUE_NAME, {
       connection: this.connection,
     });
-  }
-
-  async enqueueDemoJob(message: string) {
-    const job = await this.demoQueue.add(
-      'process-demo',
-      { message, enqueuedAt: new Date().toISOString() },
-      {
-        removeOnComplete: 100,
-        removeOnFail: 50,
-      },
-    );
-
-    return {
-      jobId: job.id,
-      queue: DEMO_QUEUE_NAME,
-      status: 'queued',
-    };
   }
 
   async enqueueOrganizationExport() {
@@ -98,7 +77,6 @@ export class QueueService implements OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await this.demoQueue.close();
     await this.orgIoQueue.close();
     await this.connection.quit();
   }

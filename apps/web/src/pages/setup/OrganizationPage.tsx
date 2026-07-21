@@ -56,7 +56,8 @@ interface UserOption {
   id: string;
   fullName: string;
   email: string;
-  employeeCode: string | null;
+  phone: string | null;
+  accountCode: string;
 }
 
 interface PermissionGroupOption {
@@ -239,8 +240,52 @@ function getApiErrorMessage(error: unknown, fallback: string) {
 function userSelectOptions(users: UserOption[]) {
   return users.map((u) => ({
     value: u.id,
-    label: `${u.fullName}${u.employeeCode ? ` (${u.employeeCode})` : ''}`,
+    label: `${u.fullName} (${u.accountCode})`,
   }));
+}
+
+/** Khi chọn hồ sơ liên kết, tự điền họ tên / SĐT / email lên form. */
+function LinkedProfileSelect({
+  users,
+  nameField,
+  phoneField,
+  emailField,
+  value,
+  onChange,
+}: {
+  users: UserOption[];
+  nameField?: NamePath;
+  phoneField?: NamePath;
+  emailField?: NamePath;
+  value?: string;
+  onChange?: (value: string | undefined) => void;
+}) {
+  const form = Form.useFormInstance();
+  return (
+    <Select
+      allowClear
+      showSearch
+      optionFilterProp="label"
+      placeholder="Chọn user hệ thống"
+      options={userSelectOptions(users)}
+      value={value}
+      onChange={(userId: string | undefined) => {
+        onChange?.(userId);
+        if (!userId) return;
+        const user = users.find((u) => u.id === userId);
+        if (!user) return;
+        if (nameField !== undefined) {
+          form.setFieldValue(nameField, user.fullName);
+        }
+        if (phoneField !== undefined) {
+          form.setFieldValue(phoneField, user.phone ?? undefined);
+        }
+        if (emailField !== undefined) {
+          form.setFieldValue(emailField, user.email);
+        }
+      }}
+    />
+  );
 }
 
 function scopeTypeLabel(type: OrgNodeType | string) {
@@ -453,7 +498,12 @@ function MembersFormList({
                       name={[name, 'linkedProfileUserId']}
                       label="Hồ sơ liên kết"
                     >
-                      <Select allowClear placeholder="Chọn user hệ thống" options={userSelectOptions(users)} />
+                      <LinkedProfileSelect
+                        users={users}
+                        nameField={['members', name, 'memberName']}
+                        phoneField={['members', name, 'phone']}
+                        emailField={['members', name, 'email']}
+                      />
                     </Form.Item>
                   </Col>
                 )}
@@ -593,7 +643,7 @@ export function OrganizationPage() {
 
   const loadUsers = useCallback(async () => {
     const { data } = await api.get<{ items: UserOption[] }>('/users', {
-      params: { pageSize: 200 },
+      params: { pageSize: 100 },
     });
     setUsers(data.items);
   }, []);
@@ -644,7 +694,7 @@ export function OrganizationPage() {
     if (userId) {
       const user = users.find((u) => u.id === userId);
       if (user) {
-        return `${user.fullName}${user.employeeCode ? ` (${user.employeeCode})` : ''}`;
+        return `${user.fullName} (${user.accountCode})`;
       }
     }
     return displayText(fallbackName);
@@ -942,7 +992,6 @@ export function OrganizationPage() {
 
   const renderEditForm = () => {
     if (!selected) return null;
-    const userOptions = userSelectOptions(users);
     if (selected.type === OrgNodeType.ORGANIZATION) {
       return (
         <>
@@ -953,7 +1002,7 @@ export function OrganizationPage() {
             <Input />
           </Form.Item>
           <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
-            <Select allowClear placeholder="Chọn user hệ thống" options={userOptions} />
+            <LinkedProfileSelect users={users} nameField="representativeName" />
           </Form.Item>
           <PositionPermissionFields
             namePath="positionPermission"
@@ -983,7 +1032,12 @@ export function OrganizationPage() {
             <Input />
           </Form.Item>
           <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
-            <Select allowClear placeholder="Chọn user hệ thống" options={userOptions} />
+            <LinkedProfileSelect
+              users={users}
+              nameField="representativeName"
+              phoneField="phone"
+              emailField="email"
+            />
           </Form.Item>
           <PositionPermissionFields
             namePath="positionPermission"
@@ -1017,7 +1071,7 @@ export function OrganizationPage() {
           <Input />
         </Form.Item>
         <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
-          <Select allowClear placeholder="Chọn user hệ thống" options={userOptions} />
+          <LinkedProfileSelect users={users} nameField="managerName" />
         </Form.Item>
         <PositionPermissionFields
           namePath="positionPermission"
@@ -1349,7 +1403,12 @@ export function OrganizationPage() {
             <Input />
           </Form.Item>
           <Form.Item name="linkedProfileUserId" label="Hồ sơ liên kết">
-            <Select allowClear placeholder="Chọn user hệ thống" options={userSelectOptions(users)} />
+            <LinkedProfileSelect
+              users={users}
+              nameField="memberName"
+              phoneField="phone"
+              emailField="email"
+            />
           </Form.Item>
           <Form.Item name="phone" label="Số điện thoại">
             <Input />

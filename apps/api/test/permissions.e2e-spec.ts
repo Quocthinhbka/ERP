@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import { Permissions } from '@erp/shared';
-import { createTestApp, getHttpServer } from './test-utils';
+import { createTestApp, getHttpServer, loginAsAdmin } from './test-utils';
 
 describe('Setup / Permissions (e2e)', () => {
   let app: INestApplication;
@@ -13,12 +13,7 @@ describe('Setup / Permissions (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-
-    const login = await request(getHttpServer(app))
-      .post('/api/auth/login')
-      .send({ identifier: 'admin@hyperlabs.vn', password: 'Admin@123' });
-
-    accessToken = login.body.accessToken;
+    accessToken = await loginAsAdmin(app);
 
     const roles = await request(getHttpServer(app))
       .get('/api/roles')
@@ -116,14 +111,4 @@ describe('Setup / Permissions (e2e)', () => {
     createdUserId = res.body.id;
   });
 
-  it('POST /api/queue/demo enqueues job', async () => {
-    const res = await request(getHttpServer(app))
-      .post('/api/queue/demo')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({ message: 'E2E test job' })
-      .expect(201);
-
-    expect(res.body.jobId).toBeDefined();
-    expect(res.body.status).toBe('queued');
-  });
 });

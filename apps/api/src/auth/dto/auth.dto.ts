@@ -1,11 +1,4 @@
-import {
-  IsArray,
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MinLength,
-} from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, MinLength, IsEmail, IsArray } from 'class-validator';
 
 export class LoginDto {
   @IsString()
@@ -17,13 +10,8 @@ export class LoginDto {
   password!: string;
 }
 
-export class RefreshTokenDto {
-  @IsString()
-  @IsNotEmpty()
-  refreshToken!: string;
-}
-
-export class CreateUserDto {
+/** Chỉ dùng khi DB chưa có user nào — tạo Super Admin đầu tiên. */
+export class BootstrapAdminDto {
   @IsEmail()
   email!: string;
 
@@ -37,7 +25,27 @@ export class CreateUserDto {
 
   @IsOptional()
   @IsString()
-  employeeCode?: string;
+  phone?: string;
+}
+
+export class RefreshTokenDto {
+  /** Có thể bỏ trống khi refresh token nằm trong HttpOnly cookie. */
+  @IsOptional()
+  @IsString()
+  refreshToken?: string;
+}
+
+export class CreateUserDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  @MinLength(8)
+  password!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  fullName!: string;
 
   @IsOptional()
   @IsString()

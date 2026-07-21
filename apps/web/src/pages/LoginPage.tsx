@@ -26,8 +26,30 @@ export function LoginPage() {
       await login({ identifier: values.identifier.trim(), password: values.password });
       message.success('Đăng nhập thành công');
       navigate('/');
-    } catch {
-      message.error('Thông tin đăng nhập hoặc mật khẩu không đúng');
+    } catch (error: unknown) {
+      const status =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { status?: number; data?: { message?: string | string[] } } })
+              .response?.status
+          : undefined;
+      const serverMessage =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { data?: { message?: string | string[] } } }).response?.data
+              ?.message
+          : undefined;
+      if (status === 429) {
+        message.error('Thử đăng nhập quá nhiều lần. Vui lòng đợi khoảng 1 phút rồi thử lại.');
+      } else if (status === 401) {
+        message.error('Thông tin đăng nhập hoặc mật khẩu không đúng');
+      } else if (typeof serverMessage === 'string') {
+        message.error(serverMessage);
+      } else if (Array.isArray(serverMessage) && serverMessage[0]) {
+        message.error(String(serverMessage[0]));
+      } else if (error instanceof Error && error.message) {
+        message.error(error.message);
+      } else {
+        message.error('Không kết nối được máy chủ. Kiểm tra API đang chạy và thử lại.');
+      }
     } finally {
       setLoading(false);
     }
@@ -45,16 +67,16 @@ export function LoginPage() {
     >
       <Card style={{ width: 420 }} title="ERP HyperLabs">
         <Typography.Paragraph type="secondary">
-          Đăng nhập bằng Mã nhân viên, Số điện thoại hoặc Email
+          Đăng nhập bằng Mã tài khoản, Số điện thoại hoặc Email
         </Typography.Paragraph>
         <Form layout="vertical" onFinish={onFinish} data-testid="login-form">
           <Form.Item
-            label="Mã NV / SĐT / Email"
+            label="Mã TK / SĐT / Email"
             name="identifier"
-            rules={[{ required: true, message: 'Nhập mã nhân viên, SĐT hoặc email' }]}
+            rules={[{ required: true, message: 'Nhập mã tài khoản, SĐT hoặc email' }]}
           >
             <Input
-              placeholder="NV001, 0900000001 hoặc admin@hyperlabs.vn"
+              placeholder="Mã tài khoản, SĐT hoặc email"
               data-testid="login-identifier"
             />
           </Form.Item>

@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: erp_secret
       POSTGRES_DB: erp_db
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - erp_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,12 +21,13 @@ services:
     image: redis:8
     container_name: erp-redis
     restart: unless-stopped
+    command: ['redis-server', '--requirepass', 'erp_redis_secret']
     ports:
-      - '6380:6379'
+      - '127.0.0.1:6380:6379'
     volumes:
       - erp_redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD', 'redis-cli', '-a', 'erp_redis_secret', 'ping']
       interval: 5s
       timeout: 5s
       retries: 5

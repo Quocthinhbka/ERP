@@ -17,9 +17,9 @@ export class CompaniesService {
   ) {}
 
   async create(dto: CreateCompanyDto) {
-    const org = await this.prisma.organization.findFirst();
+    let org = await this.prisma.organization.findFirst();
     if (!org) {
-      throw new NotFoundException('Organization not found');
+      org = await this.prisma.organization.create({ data: { name: 'Tổ chức' } });
     }
 
     if (dto.linkedProfileUserId) {

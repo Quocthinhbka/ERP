@@ -435,8 +435,7 @@ export function MainLayout() {
             size="small"
             icon={<LogoutOutlined />}
             onClick={() => {
-              logout();
-              navigate('/login');
+              void logout().finally(() => navigate('/login'));
             }}
           >
             Đăng xuất

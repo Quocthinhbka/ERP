@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { OrgScopeNode, PermissionCode } from '@erp/shared';
-import { api } from '../lib/api';
+import { api, setMemoryAccessToken } from '../lib/api';
 
 interface AuthUser {
   id: string;
@@ -28,7 +28,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   hasPermission: (permission: PermissionCode) => boolean;
 }
 
@@ -39,19 +39,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchMe = useCallback(async () => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       const { data } = await api.get<AuthUser>('/auth/me');
       setUser(data);
     } catch {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
+      setMemoryAccessToken(null);
       setUser(null);
     } finally {
       setLoading(false);
@@ -64,19 +56,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const { data } = await api.post('/auth/login', credentials);
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
+    if (!data?.user || !data?.accessToken) {
+      throw new Error('Phản hồi đăng nhập không hợp lệ');
+    }
+    setMemoryAccessToken(data.accessToken);
     setUser(data.user);
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+  const logout = useCallback(async () => {
+    try {
+      await api.post('/auth/logout', {});
+    } catch {
+      // Cookie có thể đã hết hạn — vẫn xóa state local.
+    }
+    setMemoryAccessToken(null);
     setUser(null);
   }, []);
 
   const hasPermission = useCallback(
-    (permission: PermissionCode) => user?.permissions.includes(permission) ?? false,
+    (permission: PermissionCode) =>
+      user?.isSystemAdmin === true ||
+      (user?.permissions.includes(permission) ?? false),
     [user],
   );
 

@@ -4,7 +4,7 @@ import { INestApplication } from '@nestjs/common';
 
 import { EntityStatus, OrgNodeType } from '@erp/shared';
 
-import { createTestApp, getHttpServer } from './test-utils';
+import { createTestApp, getHttpServer, TEST_ADMIN } from './test-utils';
 
 
 
@@ -32,7 +32,10 @@ describe('Organization (e2e)', () => {
 
       .post('/api/auth/login')
 
-      .send({ identifier: 'admin@hyperlabs.vn', password: 'Admin@123' });
+      .send({
+        identifier: TEST_ADMIN.email,
+        password: TEST_ADMIN.password,
+      });
 
     accessToken = login.body.accessToken;
 

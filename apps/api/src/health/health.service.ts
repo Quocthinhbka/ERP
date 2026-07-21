@@ -27,18 +27,19 @@ export class HealthService {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'up' as const };
-    } catch (error) {
+    } catch {
       return {
         status: 'down' as const,
-        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
   }
 
   private async checkRedis() {
+    const password = this.config.get<string>('REDIS_PASSWORD');
     const redis = new Redis({
       host: this.config.get<string>('REDIS_HOST', 'localhost'),
       port: this.config.get<number>('REDIS_PORT', 6380),
+      password: password || undefined,
       maxRetriesPerRequest: 1,
       connectTimeout: 3000,
       lazyConnect: true,
@@ -49,7 +50,7 @@ export class HealthService {
       const pong = await redis.ping();
       await redis.quit();
       return { status: pong === 'PONG' ? ('up' as const) : ('down' as const) };
-    } catch (error) {
+    } catch {
       try {
         await redis.quit();
       } catch {
@@ -57,7 +58,6 @@ export class HealthService {
       }
       return {
         status: 'down' as const,
-        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
   }

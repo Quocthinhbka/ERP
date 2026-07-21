@@ -24,7 +24,7 @@ export class UsersService {
           OR: [
             { email: { contains: search, mode: 'insensitive' as const } },
             { fullName: { contains: search, mode: 'insensitive' as const } },
-            { employeeCode: { contains: search, mode: 'insensitive' as const } },
+            { accountCode: { contains: search, mode: 'insensitive' as const } },
             { phone: { contains: search, mode: 'insensitive' as const } },
           ],
         }
@@ -68,55 +68,74 @@ export class UsersService {
 
   async create(dto: CreateUserDto) {
     await this.authService.ensureEmailAvailable(dto.email);
-    if (dto.employeeCode) {
-      await this.authService.ensureEmployeeCodeAvailable(dto.employeeCode);
-    }
     if (dto.phone) {
       await this.authService.ensurePhoneAvailable(dto.phone);
     }
-    await this.ensureNoSuperAdminAssignment(dto.roleIds);
+    await this.rejectSuperAdminRoleAssignment(dto.roleIds);
 
     const passwordHash = await this.authService.hashPassword(dto.password);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email.toLowerCase(),
-        fullName: dto.fullName,
-        employeeCode: dto.employeeCode,
-        phone: dto.phone,
-        passwordHash,
-        roles: {
-          create: dto.roleIds.map((roleId) => ({ roleId })),
+    const user = await this.prisma.$transaction(async (tx) => {
+      const accountCode = await this.authService.allocateNextAccountCode(tx);
+      return tx.user.create({
+        data: {
+          email: dto.email.toLowerCase(),
+          fullName: dto.fullName,
+          accountCode,
+          phone: dto.phone,
+          passwordHash,
+          roles: {
+            create: dto.roleIds.map((roleId) => ({ roleId })),
+          },
         },
-      },
-      include: {
-        roles: { include: { role: true } },
-      },
+        include: {
+          roles: { include: { role: true } },
+        },
+      });
     });
 
     return this.toResponse(user);
   }
 
   async update(id: string, dto: UpdateUserDto) {
-    await this.findOne(id);
+    const existing = await this.prisma.user.findUnique({
+      where: { id },
+      include: { roles: { include: { role: true } } },
+    });
+    if (!existing) {
+      throw new NotFoundException('Account not found');
+    }
+
+    const isSuperAdmin = existing.roles.some(
+      (r) => r.role.code === SystemRole.SUPER_ADMIN,
+    );
+
+    if (isSuperAdmin) {
+      if (dto.roleIds !== undefined) {
+        throw new BadRequestException(
+          'Cannot change roles of the Super Admin account',
+        );
+      }
+      if (dto.isActive === false) {
+        throw new BadRequestException(
+          'Cannot deactivate the Super Admin account',
+        );
+      }
+    }
 
     if (dto.email) {
       await this.authService.ensureEmailAvailable(dto.email, id);
-    }
-    if (dto.employeeCode) {
-      await this.authService.ensureEmployeeCodeAvailable(dto.employeeCode, id);
     }
     if (dto.phone) {
       await this.authService.ensurePhoneAvailable(dto.phone, id);
     }
     if (dto.roleIds) {
-      await this.ensureNoSuperAdminAssignment(dto.roleIds, id);
+      await this.rejectSuperAdminRoleAssignment(dto.roleIds);
     }
 
     const data: {
       email?: string;
       fullName?: string;
-      employeeCode?: string | null;
       phone?: string | null;
       passwordHash?: string;
       isActive?: boolean;
@@ -124,7 +143,6 @@ export class UsersService {
 
     if (dto.email !== undefined) data.email = dto.email.toLowerCase();
     if (dto.fullName !== undefined) data.fullName = dto.fullName;
-    if (dto.employeeCode !== undefined) data.employeeCode = dto.employeeCode || null;
     if (dto.phone !== undefined) data.phone = dto.phone || null;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.password) {
@@ -158,7 +176,7 @@ export class UsersService {
       throw new NotFoundException('Account not found');
     }
     if (user.roles.some((r) => r.role.code === SystemRole.SUPER_ADMIN)) {
-      throw new BadRequestException('Cannot delete the system administrator account');
+      throw new BadRequestException('Cannot delete the Super Admin account');
     }
     await this.prisma.user.delete({ where: { id } });
     return { success: true };
@@ -181,28 +199,20 @@ export class UsersService {
       permissions: grouped,
       effectivePermissionCodes: auth.permissions,
       orgScopes: auth.orgScopes,
-      note: 'Quyền hiệu lực được suy ra từ vị trí trên cây tổ chức (union).',
+      note: auth.isSystemAdmin
+        ? 'Super Admin có toàn quyền hệ thống theo mặc định và không thể thay đổi.'
+        : 'Quyền hiệu lực = union RolePermission và quyền từ vị trí trên cây tổ chức.',
     };
   }
 
-  private async ensureNoSuperAdminAssignment(roleIds: string[], excludeUserId?: string) {
+  /** Super Admin chỉ tạo qua /auth/bootstrap (DB trống) — không cho gán qua API. */
+  private async rejectSuperAdminRoleAssignment(roleIds: string[]) {
     const roles = await this.prisma.role.findMany({
       where: { id: { in: roleIds } },
     });
-    const assigningSuperAdmin = roles.some((r) => r.code === SystemRole.SUPER_ADMIN);
-    if (!assigningSuperAdmin) {
-      return;
-    }
-
-    const existing = await this.prisma.userRole.findFirst({
-      where: {
-        role: { code: SystemRole.SUPER_ADMIN },
-        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
-      },
-    });
-    if (existing || !excludeUserId) {
+    if (roles.some((r) => r.code === SystemRole.SUPER_ADMIN)) {
       throw new BadRequestException(
-        'Only one system administrator account is allowed',
+        'Cannot assign Super Admin role through the API',
       );
     }
   }
@@ -212,21 +222,23 @@ export class UsersService {
     email: string;
     fullName: string;
     isActive: boolean;
-    employeeCode: string | null;
+    accountCode: string;
     phone: string | null;
     linkedEmployeeProfileId: string | null;
     createdAt: Date;
     updatedAt: Date;
     roles: Array<{ role: { id: string; code: string; name: string } }>;
   }) {
+    const isSuperAdmin = user.roles.some((r) => r.role.code === SystemRole.SUPER_ADMIN);
     return {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
       isActive: user.isActive,
-      employeeCode: user.employeeCode,
+      accountCode: user.accountCode,
       phone: user.phone,
       linkedEmployeeProfileId: user.linkedEmployeeProfileId,
+      isSuperAdmin,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       roles: user.roles.map((r) => ({

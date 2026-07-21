@@ -1,12 +1,22 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
+  app.use(
+    helmet({
+      // API phục vụ SPA qua proxy/CORS — không dùng CORP same-origin mặc định.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: false,
+    }),
+  );
+  app.use(cookieParser());
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -17,7 +27,10 @@ async function bootstrap() {
   );
 
   const corsOrigin = config.get<string>('API_CORS_ORIGIN', 'http://localhost:5173');
-  app.enableCors({ origin: corsOrigin, credentials: true });
+  const corsOrigins = Array.from(
+    new Set([corsOrigin, 'http://localhost:5173', 'http://127.0.0.1:5173']),
+  );
+  app.enableCors({ origin: corsOrigins, credentials: true });
 
   const port = config.get<number>('API_PORT', 3000);
   await app.listen(port);

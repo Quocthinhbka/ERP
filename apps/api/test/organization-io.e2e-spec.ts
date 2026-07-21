@@ -20,7 +20,7 @@ import {
   type ApplySelection,
   type OrganizationSnapshot,
 } from '@erp/organization-io';
-import { createTestApp, getHttpServer } from './test-utils';
+import { createTestApp, getHttpServer, loginAsAdmin } from './test-utils';
 
 config({ path: resolve(__dirname, '../../../.env') });
 
@@ -61,6 +61,7 @@ describe('Organization Import/Export (e2e)', () => {
     redis = new Redis({
       host: process.env.REDIS_HOST ?? 'localhost',
       port: Number(process.env.REDIS_PORT ?? 6380),
+      password: process.env.REDIS_PASSWORD || undefined,
       maxRetriesPerRequest: null,
     });
 
@@ -87,10 +88,7 @@ describe('Organization Import/Export (e2e)', () => {
     );
 
     app = await createTestApp();
-    const login = await request(getHttpServer(app))
-      .post('/api/auth/login')
-      .send({ identifier: 'admin@hyperlabs.vn', password: 'Admin@123' });
-    accessToken = login.body.accessToken;
+    accessToken = await loginAsAdmin(app);
   });
 
   afterAll(async () => {
@@ -157,14 +155,15 @@ describe('Organization Import/Export (e2e)', () => {
     const completedDiff = await waitJob(app, accessToken, diffJob.body.jobId);
     expect(completedDiff.status).toBe('completed');
     expect(completedDiff.result.diff).toBeDefined();
-    expect(completedDiff.result.snapshotPath).toBeDefined();
+    expect(completedDiff.result.hasSnapshot).toBe(true);
+    expect(completedDiff.result.snapshotPath).toBeUndefined();
 
     // Apply empty selection — no DB mutation
     const applyJob = await request(getHttpServer(app))
       .post('/api/organization/import/apply')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        snapshotPath: completedDiff.result.snapshotPath,
+        snapshotJobId: diffJob.body.jobId,
         selections: [],
       })
       .expect(201);

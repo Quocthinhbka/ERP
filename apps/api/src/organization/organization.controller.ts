@@ -97,7 +97,11 @@ export class OrganizationController {
 
   @Post('import/diff')
   @RequirePermissions(Permissions.ORGANIZATION_MANAGE)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: Number(process.env.UPLOAD_MAX_BYTES) || 5 * 1024 * 1024 },
+    }),
+  )
   importDiff(@CurrentUser() user: RequestUser, @UploadedFile() file: Express.Multer.File) {
     this.requireFullOrgAccess(user);
     return this.organizationIoService.enqueueDiff(file);
@@ -107,7 +111,7 @@ export class OrganizationController {
   @RequirePermissions(Permissions.ORGANIZATION_MANAGE)
   importApply(@CurrentUser() user: RequestUser, @Body() dto: ApplyOrganizationImportDto) {
     this.requireFullOrgAccess(user);
-    return this.organizationIoService.enqueueApply(dto.snapshotPath, dto.selections);
+    return this.organizationIoService.enqueueApply(dto.snapshotJobId, dto.selections);
   }
 
   @Get('io/jobs/:jobId')

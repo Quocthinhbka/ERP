@@ -12,6 +12,7 @@ import {
   PositionPermissionSummary,
   SystemRole,
   ALL_PERMISSIONS,
+  hasOrgScopeAccess,
   orgScopeKey,
 } from '@erp/shared';
 import { Prisma } from '@prisma/client';
@@ -44,7 +45,15 @@ export class PositionPermissionsService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        roles: { include: { role: true } },
+        roles: {
+          include: {
+            role: {
+              include: {
+                permissions: { include: { permission: true } },
+              },
+            },
+          },
+        },
       },
     });
     if (!user) {
@@ -62,9 +71,20 @@ export class PositionPermissionsService {
       };
     }
 
+    const codes = new Set<PermissionCode>();
+    for (const userRole of user.roles) {
+      for (const rolePermission of userRole.role.permissions) {
+        codes.add(rolePermission.permission.code as PermissionCode);
+      }
+    }
+
     const holders = await this.findHoldersForUser(userId);
     if (holders.length === 0) {
-      return { permissions: [], isSystemAdmin: false, orgScopes: [] };
+      return {
+        permissions: Array.from(codes),
+        isSystemAdmin: false,
+        orgScopes: [],
+      };
     }
 
     const positionPermissions = await this.prisma.positionPermission.findMany({
@@ -80,7 +100,6 @@ export class PositionPermissionsService {
       },
     });
 
-    const codes = new Set<PermissionCode>();
     const orgScopes: OrgScopeNode[] = [];
     const scopeKeys = new Set<string>();
 
@@ -272,15 +291,7 @@ export class PositionPermissionsService {
     nodeId: string,
     ancestorKeys: string[],
   ) {
-    if (isSystemAdmin) {
-      return;
-    }
-    const nodeKey = orgScopeKey(nodeType, nodeId);
-    const allowed = orgScopes.some((grant) => {
-      const grantKey = orgScopeKey(grant.type, grant.id);
-      return grantKey === nodeKey || ancestorKeys.includes(grantKey);
-    });
-    if (!allowed) {
+    if (!hasOrgScopeAccess(isSystemAdmin, orgScopes, nodeType, nodeId, ancestorKeys)) {
       throw new ForbiddenException('Outside permitted organization scope');
     }
   }

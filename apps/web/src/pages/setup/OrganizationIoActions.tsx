@@ -45,7 +45,8 @@ interface JobResponse {
   result?: {
     success?: boolean;
     fileName?: string;
-    snapshotPath?: string;
+    hasSnapshot?: boolean;
+    hasFile?: boolean;
     diff?: DiffResult;
     applied?: { created: number; updated: number; deleted: number };
     errors?: string[];
@@ -101,7 +102,7 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
   const [diffOpen, setDiffOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [diff, setDiff] = useState<DiffResult | null>(null);
-  const [snapshotPath, setSnapshotPath] = useState<string | null>(null);
+  const [snapshotJobId, setSnapshotJobId] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -147,11 +148,11 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const job = await waitForJob(data.jobId);
-      if (job.status !== 'completed' || !job.result?.diff || !job.result.snapshotPath) {
+      if (job.status !== 'completed' || !job.result?.diff || !job.result.hasSnapshot) {
         throw new Error(job.failedReason || 'So sánh import thất bại');
       }
       setDiff(job.result.diff);
-      setSnapshotPath(job.result.snapshotPath);
+      setSnapshotJobId(data.jobId);
       setSelectedKeys([]);
       setDiffOpen(true);
       message.success('Đã tạo bảng so sánh');
@@ -164,7 +165,7 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
   };
 
   const handleApply = async () => {
-    if (!snapshotPath) return;
+    if (!snapshotJobId) return;
     if (selectedKeys.length === 0) {
       message.warning('Chưa chọn nội dung cập nhật');
       return;
@@ -172,7 +173,7 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
     setLoading(true);
     try {
       const { data } = await api.post<{ jobId: string }>('/organization/import/apply', {
-        snapshotPath,
+        snapshotJobId,
         selections: selectedKeys.map((selectionKey) => ({ selectionKey })),
       });
       const job = await waitForJob(data.jobId);
@@ -188,7 +189,7 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
       }
       setDiffOpen(false);
       setDiff(null);
-      setSnapshotPath(null);
+      setSnapshotJobId(null);
       setSelectedKeys([]);
       await onApplied();
     } catch (error) {

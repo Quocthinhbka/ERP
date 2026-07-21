@@ -1,12 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.getByTestId('login-identifier').fill('admin@hyperlabs.vn');
-  await page.getByTestId('login-password').fill('Admin@123');
-  await page.getByTestId('login-submit').click();
-  await expect(page.getByRole('heading', { name: 'Tổng quan' })).toBeVisible({ timeout: 10000 });
-}
+import { loginAsAdmin, TEST_ADMIN } from './helpers';
 
 test.describe('Organization page', () => {
   test('shows organization tree page', async ({ page }) => {
@@ -55,7 +48,7 @@ test.describe('Organization page', () => {
     test.setTimeout(60000);
     const apiBase = 'http://127.0.0.1:3000/api';
     const login = await request.post(`${apiBase}/auth/login`, {
-      data: { identifier: 'admin@hyperlabs.vn', password: 'Admin@123' },
+      data: { identifier: TEST_ADMIN.email, password: TEST_ADMIN.password },
     });
     expect(login.ok()).toBeTruthy();
     const { accessToken } = (await login.json()) as { accessToken: string };

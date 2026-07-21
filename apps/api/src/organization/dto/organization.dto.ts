@@ -282,7 +282,7 @@ export class ReorderNodeDto {
 export class ApplyOrganizationImportDto {
   @IsString()
   @IsNotEmpty()
-  snapshotPath!: string;
+  snapshotJobId!: string;
 
   @IsArray()
   @ValidateNested({ each: true })

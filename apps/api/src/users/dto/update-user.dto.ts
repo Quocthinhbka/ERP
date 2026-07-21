@@ -18,10 +18,6 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  employeeCode?: string;
-
-  @IsOptional()
-  @IsString()
   phone?: string;
 
   @IsOptional()

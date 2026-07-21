@@ -1,11 +1,45 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build / cache
 dist/
 build/
-.env
-.env.local
-*.log
 coverage/
 .turbo/
+*.tsbuildinfo
+*.js.map
+.nest/
+*.pid
+*.pid.lock
+
+# Env & secrets (giữ .env.example để commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+credentials.json
+service-account*.json
+
+# Logs & OS
+*.log
+npm-debug.log*
+pnpm-debug.log*
 .DS_Store
+Thumbs.db
+
+# Test / e2e artifacts
 test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Local runtime / uploads
+tmp/
+uploads/
 prisma/generated/
+
+# IDE
+.idea/

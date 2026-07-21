@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { PositionPermissionsModule } from '../organization/position-permissions.module';
+import { parseExpiresIn } from './auth-cookies';
 
 @Module({
   imports: [
@@ -15,7 +16,10 @@ import { PositionPermissionsModule } from '../organization/position-permissions.
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
         signOptions: {
-          expiresIn: 900,
+          expiresIn: parseExpiresIn(
+            config.get<string>('JWT_ACCESS_EXPIRES_IN'),
+            900,
+          ) as never,
         },
       }),
     }),

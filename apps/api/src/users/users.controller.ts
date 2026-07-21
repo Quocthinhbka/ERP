@@ -27,7 +27,9 @@ export class UsersController {
     @Query('pageSize') pageSize = '20',
     @Query('search') search?: string,
   ) {
-    return this.usersService.findAll(Number(page), Number(pageSize), search);
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const size = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
+    return this.usersService.findAll(pageNum, size, search);
   }
 
   @Get(':id/permissions')

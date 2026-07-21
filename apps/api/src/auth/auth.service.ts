@@ -1,15 +1,30 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { AuthTokens, JwtPayload, OrgScopeNode, PermissionCode } from '@erp/shared';
+import {
+  AuthTokens,
+  formatAccountCode,
+  JwtPayload,
+  OrgScopeNode,
+  parseAccountCodeSequence,
+  PermissionCode,
+  SystemRole,
+} from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
-import { LoginDto } from './dto/auth.dto';
+import { BootstrapAdminDto, LoginDto } from './dto/auth.dto';
 import { PositionPermissionsService } from '../organization/position-permissions.service';
+import {
+  durationToMs,
+  hashToken,
+  newTokenId,
+  parseExpiresIn,
+} from './auth-cookies';
 
 @Injectable()
 export class AuthService {
@@ -19,6 +34,25 @@ export class AuthService {
     private config: ConfigService,
     private positionPermissions: PositionPermissionsService,
   ) {}
+
+  get accessExpiresIn() {
+    return parseExpiresIn(this.config.get<string>('JWT_ACCESS_EXPIRES_IN'), 900);
+  }
+
+  get refreshExpiresIn() {
+    return parseExpiresIn(this.config.get<string>('JWT_REFRESH_EXPIRES_IN'), 604800);
+  }
+
+  private get accessSecret() {
+    return this.config.getOrThrow<string>('JWT_SECRET');
+  }
+
+  private get refreshSecret() {
+    return (
+      this.config.get<string>('JWT_REFRESH_SECRET') ??
+      this.config.getOrThrow<string>('JWT_SECRET')
+    );
+  }
 
   async login(
     dto: LoginDto,
@@ -45,13 +79,7 @@ export class AuthService {
     }
 
     const auth = await this.positionPermissions.resolveAuthContext(user.id);
-    const tokens = await this.generateTokens({
-      sub: user.id,
-      email: user.email,
-      permissions: auth.permissions,
-      isSystemAdmin: auth.isSystemAdmin,
-      orgScopes: auth.orgScopes,
-    });
+    const tokens = await this.generateTokens(user.id, user.email);
 
     return {
       ...tokens,
@@ -67,10 +95,31 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
     try {
       const payload = this.jwtService.verify<JwtPayload>(refreshToken, {
-        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+        secret: this.refreshSecret,
       });
+
+      if (payload.typ !== 'refresh' || !payload.jti) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const stored = await this.prisma.refreshToken.findUnique({
+        where: { id: payload.jti },
+      });
+
+      if (
+        !stored ||
+        stored.revokedAt ||
+        stored.expiresAt.getTime() <= Date.now() ||
+        stored.tokenHash !== hashToken(refreshToken)
+      ) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
 
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
@@ -80,20 +129,46 @@ export class AuthService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
-      const auth = await this.positionPermissions.resolveAuthContext(user.id);
-      return this.generateTokens({
-        sub: user.id,
-        email: user.email,
-        permissions: auth.permissions,
-        isSystemAdmin: auth.isSystemAdmin,
-        orgScopes: auth.orgScopes,
+      await this.prisma.refreshToken.update({
+        where: { id: stored.id },
+        data: { revokedAt: new Date() },
       });
-    } catch {
+
+      return this.generateTokens(user.id, user.email);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid refresh token');
     }
   }
 
+  async logout(refreshToken?: string) {
+    if (!refreshToken) {
+      return;
+    }
+
+    try {
+      const payload = this.jwtService.verify<JwtPayload>(refreshToken, {
+        secret: this.refreshSecret,
+        ignoreExpiration: true,
+      });
+      if (payload.jti) {
+        await this.prisma.refreshToken.updateMany({
+          where: { id: payload.jti, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+    } catch {
+      // Token không hợp lệ — vẫn coi logout thành công phía client.
+    }
+  }
+
   async validateUserPayload(payload: JwtPayload) {
+    if (payload.typ !== 'access') {
+      throw new UnauthorizedException('Invalid access token');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });
@@ -116,21 +191,53 @@ export class AuthService {
     return bcrypt.hash(password, 10);
   }
 
+  /**
+   * Tạo Super Admin đầu tiên khi chưa có user nào.
+   * Thay thế prisma seed — chỉ gọi được một lần trên DB trống.
+   */
+  async bootstrapAdmin(dto: BootstrapAdminDto) {
+    const userCount = await this.prisma.user.count();
+    if (userCount > 0) {
+      throw new ForbiddenException('Bootstrap is only allowed on an empty database');
+    }
+
+    const email = dto.email.toLowerCase();
+    await this.ensureEmailAvailable(email);
+    if (dto.phone) {
+      await this.ensurePhoneAvailable(dto.phone);
+    }
+
+    const superAdminRole = await this.prisma.role.findUnique({
+      where: { code: SystemRole.SUPER_ADMIN },
+    });
+    if (!superAdminRole) {
+      throw new ConflictException('System roles are not initialized yet');
+    }
+
+    const passwordHash = await this.hashPassword(dto.password);
+    const accountCode = await this.allocateNextAccountCode();
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        fullName: dto.fullName,
+        phone: dto.phone,
+        passwordHash,
+        accountCode,
+        isActive: true,
+        roles: { create: [{ roleId: superAdminRole.id }] },
+      },
+    });
+
+    return this.login({ identifier: user.email, password: dto.password });
+  }
+
   async ensureEmailAvailable(email: string, excludeUserId?: string) {
     const existing = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
     if (existing && existing.id !== excludeUserId) {
       throw new ConflictException('Email already exists');
-    }
-  }
-
-  async ensureEmployeeCodeAvailable(employeeCode: string, excludeUserId?: string) {
-    const existing = await this.prisma.user.findUnique({
-      where: { employeeCode },
-    });
-    if (existing && existing.id !== excludeUserId) {
-      throw new ConflictException('Employee code already exists');
     }
   }
 
@@ -141,6 +248,22 @@ export class AuthService {
     if (existing && existing.id !== excludeUserId) {
       throw new ConflictException('Phone already exists');
     }
+  }
+
+  /** Sinh mã tài khoản tiếp theo dạng TK-00001 (tăng dần). */
+  async allocateNextAccountCode(
+    db: Pick<PrismaService, 'user'> = this.prisma,
+  ): Promise<string> {
+    const users = await db.user.findMany({
+      where: { accountCode: { startsWith: 'TK-' } },
+      select: { accountCode: true },
+    });
+    let max = 0;
+    for (const user of users) {
+      const seq = parseAccountCodeSequence(user.accountCode);
+      if (seq !== null && seq > max) max = seq;
+    }
+    return formatAccountCode(max + 1);
   }
 
   private async findUserForLogin(dto: LoginDto) {
@@ -156,14 +279,14 @@ export class AuthService {
         return this.prisma.user.findUnique({
           where: { phone: this.normalizePhone(identifier) },
         });
-      case 'employeeCode':
+      case 'accountCode':
         return this.prisma.user.findUnique({
-          where: { employeeCode: identifier },
+          where: { accountCode: identifier.toUpperCase() },
         });
     }
   }
 
-  private detectLoginField(identifier: string): 'email' | 'phone' | 'employeeCode' {
+  private detectLoginField(identifier: string): 'email' | 'phone' | 'accountCode' {
     if (identifier.includes('@')) {
       return 'email';
     }
@@ -173,20 +296,49 @@ export class AuthService {
       return 'phone';
     }
 
-    return 'employeeCode';
+    return 'accountCode';
   }
 
   private normalizePhone(phone: string): string {
     return phone.replace(/[\s\-().]/g, '');
   }
 
-  private async generateTokens(payload: JwtPayload): Promise<AuthTokens> {
-    const accessToken = await this.jwtService.signAsync(payload, {
-      expiresIn: 900,
+  private async generateTokens(userId: string, email: string): Promise<AuthTokens> {
+    const accessToken = await this.jwtService.signAsync(
+      {
+        sub: userId,
+        email,
+        typ: 'access',
+      } satisfies JwtPayload,
+      {
+        secret: this.accessSecret,
+        expiresIn: this.accessExpiresIn as never,
+      },
+    );
+
+    const jti = newTokenId();
+    const refreshToken = await this.jwtService.signAsync(
+      {
+        sub: userId,
+        email,
+        typ: 'refresh',
+        jti,
+      } satisfies JwtPayload,
+      {
+        secret: this.refreshSecret,
+        expiresIn: this.refreshExpiresIn as never,
+      },
+    );
+
+    await this.prisma.refreshToken.create({
+      data: {
+        id: jti,
+        userId,
+        tokenHash: hashToken(refreshToken),
+        expiresAt: new Date(Date.now() + durationToMs(this.refreshExpiresIn)),
+      },
     });
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      expiresIn: 604800,
-    });
+
     return { accessToken, refreshToken };
   }
 }

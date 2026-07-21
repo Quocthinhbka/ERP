@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { SystemRole } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 
@@ -44,6 +45,10 @@ export class RolesService {
   }
 
   async create(dto: CreateRoleDto) {
+    if (dto.code === SystemRole.SUPER_ADMIN) {
+      throw new BadRequestException('Cannot create Super Admin role');
+    }
+
     const existing = await this.prisma.role.findUnique({
       where: { code: dto.code },
     });
@@ -71,6 +76,12 @@ export class RolesService {
 
   async update(id: string, dto: UpdateRoleDto) {
     const role = await this.findOne(id);
+
+    if (role.code === SystemRole.SUPER_ADMIN) {
+      throw new BadRequestException(
+        'Super Admin role is immutable and cannot be modified',
+      );
+    }
 
     if (role.isSystem && dto.permissionIds) {
       throw new BadRequestException('Cannot modify permissions of system role');

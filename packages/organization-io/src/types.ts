@@ -12,7 +12,7 @@ export const ORG_IO_SHEETS = {
 } as const;
 
 export interface LinkedProfileRef {
-  employeeCode?: string | null;
+  accountCode?: string | null;
   email?: string | null;
   fullName?: string | null;
 }

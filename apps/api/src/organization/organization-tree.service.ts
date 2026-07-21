@@ -44,37 +44,40 @@ export class OrganizationTreeService {
     search?: string,
     scope?: { isSystemAdmin: boolean; orgScopes: OrgScopeNode[] },
   ) {
-    const org = await this.prisma.organization.findFirst({
-      include: {
-        linkedProfileUser: { select: { fullName: true } },
-        members: {
-          orderBy: { sortOrder: 'asc' },
-          include: { linkedProfileUser: { select: { fullName: true } } },
-        },
-        companies: {
-          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-          include: {
-            linkedProfileUser: { select: { fullName: true } },
-            members: {
-              orderBy: { sortOrder: 'asc' },
-              include: { linkedProfileUser: { select: { fullName: true } } },
-            },
-            units: {
-              orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-              include: {
-                linkedProfileUser: { select: { fullName: true } },
-                members: {
-                  orderBy: { sortOrder: 'asc' },
-                  include: { linkedProfileUser: { select: { fullName: true } } },
-                },
-                _count: { select: { childUnits: true } },
+    const orgInclude = {
+      linkedProfileUser: { select: { fullName: true } },
+      members: {
+        orderBy: { sortOrder: 'asc' as const },
+        include: { linkedProfileUser: { select: { fullName: true } } },
+      },
+      companies: {
+        orderBy: [{ sortOrder: 'asc' as const }, { name: 'asc' as const }],
+        include: {
+          linkedProfileUser: { select: { fullName: true } },
+          members: {
+            orderBy: { sortOrder: 'asc' as const },
+            include: { linkedProfileUser: { select: { fullName: true } } },
+          },
+          units: {
+            orderBy: [{ sortOrder: 'asc' as const }, { name: 'asc' as const }],
+            include: {
+              linkedProfileUser: { select: { fullName: true } },
+              members: {
+                orderBy: { sortOrder: 'asc' as const },
+                include: { linkedProfileUser: { select: { fullName: true } } },
               },
+              _count: { select: { childUnits: true } },
             },
           },
         },
       },
-    });
+    };
 
+    let org = await this.prisma.organization.findFirst({ include: orgInclude });
+    if (!org) {
+      await this.prisma.organization.create({ data: { name: 'Tổ chức' } });
+      org = await this.prisma.organization.findFirst({ include: orgInclude });
+    }
     if (!org) {
       throw new NotFoundException('Organization not found');
     }

@@ -21,7 +21,7 @@ function stringifyCell(value: ExcelJS.CellValue): string {
 function parseLinked(code: string, email: string, fullName: string): LinkedProfileRef | null {
   if (!code && !email && !fullName) return null;
   return {
-    employeeCode: code || null,
+    accountCode: code || null,
     email: email || null,
     fullName: fullName || null,
   };
@@ -45,7 +45,7 @@ export async function writeOrganizationWorkbook(
     'name',
     'representativeName',
     'additionalInfo',
-    'linkedEmployeeCode',
+    'linkedAccountCode',
     'linkedEmail',
     'linkedFullName',
     'version',
@@ -56,7 +56,7 @@ export async function writeOrganizationWorkbook(
     snapshot.organization.name,
     snapshot.organization.representativeName ?? '',
     snapshot.organization.additionalInfo ?? '',
-    snapshot.organization.linkedProfile?.employeeCode ?? '',
+    snapshot.organization.linkedProfile?.accountCode ?? '',
     snapshot.organization.linkedProfile?.email ?? '',
     snapshot.organization.linkedProfile?.fullName ?? '',
     snapshot.version,
@@ -96,7 +96,7 @@ export async function writeOrganizationWorkbook(
     'email',
     'status',
     'sortOrder',
-    'linkedEmployeeCode',
+    'linkedAccountCode',
     'linkedEmail',
     'linkedFullName',
   ]);
@@ -111,7 +111,7 @@ export async function writeOrganizationWorkbook(
       c.email ?? '',
       c.status,
       c.sortOrder,
-      c.linkedProfile?.employeeCode ?? '',
+      c.linkedProfile?.accountCode ?? '',
       c.linkedProfile?.email ?? '',
       c.linkedProfile?.fullName ?? '',
     ]);
@@ -128,7 +128,7 @@ export async function writeOrganizationWorkbook(
     'email',
     'additionalInfo',
     'sortOrder',
-    'linkedEmployeeCode',
+    'linkedAccountCode',
     'linkedEmail',
     'linkedFullName',
   ]);
@@ -143,7 +143,7 @@ export async function writeOrganizationWorkbook(
       m.email ?? '',
       m.additionalInfo ?? '',
       m.sortOrder,
-      m.linkedProfile?.employeeCode ?? '',
+      m.linkedProfile?.accountCode ?? '',
       m.linkedProfile?.email ?? '',
       m.linkedProfile?.fullName ?? '',
     ]);
@@ -162,7 +162,7 @@ export async function writeOrganizationWorkbook(
     'status',
     'additionalInfo',
     'sortOrder',
-    'linkedEmployeeCode',
+    'linkedAccountCode',
     'linkedEmail',
     'linkedFullName',
   ]);
@@ -179,7 +179,7 @@ export async function writeOrganizationWorkbook(
       u.status,
       u.additionalInfo ?? '',
       u.sortOrder,
-      u.linkedProfile?.employeeCode ?? '',
+      u.linkedProfile?.accountCode ?? '',
       u.linkedProfile?.email ?? '',
       u.linkedProfile?.fullName ?? '',
     ]);
@@ -197,7 +197,7 @@ export async function writeOrganizationWorkbook(
     'email',
     'additionalInfo',
     'sortOrder',
-    'linkedEmployeeCode',
+    'linkedAccountCode',
     'linkedEmail',
     'linkedFullName',
   ]);
@@ -213,7 +213,7 @@ export async function writeOrganizationWorkbook(
       m.email ?? '',
       m.additionalInfo ?? '',
       m.sortOrder,
-      m.linkedProfile?.employeeCode ?? '',
+      m.linkedProfile?.accountCode ?? '',
       m.linkedProfile?.email ?? '',
       m.linkedProfile?.fullName ?? '',
     ]);

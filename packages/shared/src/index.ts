@@ -33,11 +33,6 @@ export interface OrgScopeNode {
   id: string;
 }
 
-export interface PositionPermissionScopeInput {
-  includeSelf: boolean;
-  parentScopes: OrgScopeNode[];
-}
-
 export interface PositionPermissionSummary {
   holderKind: PositionHolderKind;
   holderId: string;
@@ -89,10 +84,15 @@ export enum SystemRole {
   USER = 'user',
 }
 
+export type JwtTokenType = 'access' | 'refresh';
+
 export interface JwtPayload {
   sub: string;
   email: string;
-  permissions: PermissionCode[];
+  typ: JwtTokenType;
+  /** Chỉ có trên refresh token — dùng để rotate/revoke. */
+  jti?: string;
+  permissions?: PermissionCode[];
   isSystemAdmin?: boolean;
   orgScopes?: OrgScopeNode[];
 }
@@ -102,48 +102,18 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-export interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  message?: string;
-  error?: string;
+/** Tiền tố mã tài khoản tự sinh: TK-00001, TK-00002, … */
+export const ACCOUNT_CODE_PREFIX = 'TK-';
+export const ACCOUNT_CODE_PAD = 5;
+
+export function formatAccountCode(sequence: number): string {
+  return `${ACCOUNT_CODE_PREFIX}${String(sequence).padStart(ACCOUNT_CODE_PAD, '0')}`;
 }
 
-export interface PaginatedResult<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface PermissionGroupVersionSummary {
-  id: string;
-  name: string;
-  versionNumber: number;
-  isCustom: boolean;
-  permissionCount: number;
-  positionCount: number;
-}
-
-export interface PermissionGroupSummary {
-  id: string;
-  code: string;
-  name: string;
-  isDefault: boolean;
-  permissionCount: number;
-  positionCount: number;
-  versions: PermissionGroupVersionSummary[];
-}
-
-export interface AccountSummary {
-  id: string;
-  email: string;
-  fullName: string;
-  employeeCode: string | null;
-  phone: string | null;
-  linkedEmployeeProfileId: string | null;
-  isActive: boolean;
-  roles: Array<{ id: string; code: string; name: string }>;
+export function parseAccountCodeSequence(code: string): number | null {
+  const match = new RegExp(`^${ACCOUNT_CODE_PREFIX}(\\d+)$`).exec(code.trim());
+  if (!match) return null;
+  return Number.parseInt(match[1], 10);
 }
 
 export interface OrgMember {

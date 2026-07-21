@@ -12,19 +12,7 @@ export class OrganizationService {
   ) {}
 
   async getCurrent() {
-    const org = await this.prisma.organization.findFirst({
-      include: {
-        linkedProfileUser: { select: { id: true, fullName: true } },
-        members: {
-          orderBy: { sortOrder: 'asc' },
-          include: { linkedProfileUser: { select: { id: true, fullName: true } } },
-        },
-        _count: { select: { companies: true } },
-      },
-    });
-    if (!org) {
-      throw new NotFoundException('Organization not found');
-    }
+    const org = await this.ensureOrganization();
     const positionPermission = await this.positionPermissions.getPositionPermission(
       PositionHolderKind.ORGANIZATION_REP,
       org.id,
@@ -33,10 +21,7 @@ export class OrganizationService {
   }
 
   async update(dto: UpdateOrganizationDto) {
-    const org = await this.prisma.organization.findFirst();
-    if (!org) {
-      throw new NotFoundException('Organization not found');
-    }
+    const org = await this.ensureOrganization();
 
     if (dto.linkedProfileUserId) {
       await this.ensureUser(dto.linkedProfileUserId);
@@ -89,6 +74,33 @@ export class OrganizationService {
     });
 
     return this.getCurrent();
+  }
+
+  /** Singleton tổ chức — tạo rỗng nếu chưa có (thay seed). */
+  private async ensureOrganization() {
+    const existing = await this.prisma.organization.findFirst({
+      include: {
+        linkedProfileUser: { select: { id: true, fullName: true } },
+        members: {
+          orderBy: { sortOrder: 'asc' },
+          include: { linkedProfileUser: { select: { id: true, fullName: true } } },
+        },
+        _count: { select: { companies: true } },
+      },
+    });
+    if (existing) return existing;
+
+    return this.prisma.organization.create({
+      data: { name: 'Tổ chức' },
+      include: {
+        linkedProfileUser: { select: { id: true, fullName: true } },
+        members: {
+          orderBy: { sortOrder: 'asc' },
+          include: { linkedProfileUser: { select: { id: true, fullName: true } } },
+        },
+        _count: { select: { companies: true } },
+      },
+    });
   }
 
   private async ensureUser(userId: string) {

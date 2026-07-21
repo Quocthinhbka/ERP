@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
-import { createTestApp, getHttpServer, loginAsAdmin } from './test-utils';
+import { Permissions } from '@erp/shared';
+import { createTestApp, getHttpServer, loginAsAdmin, TEST_ADMIN } from './test-utils';
 
 describe('Permission Groups (e2e)', () => {
   let app: INestApplication;
@@ -9,13 +10,50 @@ describe('Permission Groups (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
     token = await loginAsAdmin(app);
+
+    const perms = await request(getHttpServer(app))
+      .get('/api/permissions')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const allIds: string[] = (perms.body.items ?? []).map((p: { id: string }) => p.id);
+    const setupView = (perms.body.items ?? []).find(
+      (p: { code: string }) => p.code === Permissions.SETUP_VIEW,
+    );
+
+    const existing = await request(getHttpServer(app))
+      .get('/api/permission-groups')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    if (!existing.body.find((g: { code: string }) => g.code === 'full_access')) {
+      await request(getHttpServer(app))
+        .post('/api/permission-groups')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          code: 'full_access',
+          name: 'Quản trị đầy đủ',
+          permissionIds: allIds,
+        })
+        .expect(201);
+    }
+    if (!existing.body.find((g: { code: string }) => g.code === 'basic_user')) {
+      await request(getHttpServer(app))
+        .post('/api/permission-groups')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          code: 'basic_user',
+          name: 'Người dùng cơ bản',
+          permissionIds: setupView ? [setupView.id] : [],
+        })
+        .expect(201);
+    }
   });
 
   afterAll(async () => {
     await app.close();
   });
 
-  it('GET /api/permission-groups returns default groups', async () => {
+  it('GET /api/permission-groups returns groups', async () => {
     const res = await request(getHttpServer(app))
       .get('/api/permission-groups')
       .set('Authorization', `Bearer ${token}`)
@@ -25,7 +63,6 @@ describe('Permission Groups (e2e)', () => {
     expect(res.body.length).toBeGreaterThanOrEqual(2);
     const fullAccess = res.body.find((g: { code: string }) => g.code === 'full_access');
     expect(fullAccess).toBeDefined();
-    expect(fullAccess.isDefault).toBe(true);
     expect(fullAccess.versions.length).toBeGreaterThanOrEqual(1);
     expect(typeof fullAccess.positionCount).toBe('number');
   });
@@ -54,12 +91,60 @@ describe('Permission Groups (e2e)', () => {
 
     expect(res.body.items.length).toBeGreaterThan(0);
     const admin = res.body.items.find(
-      (u: { email: string }) => u.email === 'admin@hyperlabs.vn',
+      (u: { email: string }) => u.email === TEST_ADMIN.email,
     );
-    expect(admin.employeeCode).toBe('NV001');
-    expect(admin.phone).toBe('0900000001');
+    expect(admin.accountCode).toMatch(/^TK-\d{5}$/);
+    expect(admin.phone).toBe(TEST_ADMIN.phone);
     expect(admin.permissionGroupName).toBeUndefined();
+    expect(admin.isSuperAdmin).toBe(true);
     expect(admin.roles.some((r: { code: string }) => r.code === 'super_admin')).toBe(true);
+  });
+
+  it('rejects demoting or deactivating Super Admin', async () => {
+    const users = await request(getHttpServer(app))
+      .get('/api/users')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const admin = users.body.items.find(
+      (u: { email: string }) => u.email === TEST_ADMIN.email,
+    );
+    const userRole = (
+      await request(getHttpServer(app))
+        .get('/api/roles')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200)
+    ).body.find((r: { code: string }) => r.code === 'user');
+
+    await request(getHttpServer(app))
+      .patch(`/api/users/${admin.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ roleIds: [userRole.id] })
+      .expect(400);
+
+    await request(getHttpServer(app))
+      .patch(`/api/users/${admin.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ isActive: false })
+      .expect(400);
+
+    await request(getHttpServer(app))
+      .delete(`/api/users/${admin.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+  });
+
+  it('rejects modifying Super Admin role', async () => {
+    const roles = await request(getHttpServer(app))
+      .get('/api/roles')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const superAdmin = roles.body.find((r: { code: string }) => r.code === 'super_admin');
+
+    await request(getHttpServer(app))
+      .patch(`/api/roles/${superAdmin.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Hacked Super Admin' })
+      .expect(400);
   });
 
   it('GET /api/users/:id/permissions returns effective permissions from positions/admin', async () => {
@@ -69,7 +154,7 @@ describe('Permission Groups (e2e)', () => {
       .expect(200);
 
     const admin = users.body.items.find(
-      (u: { email: string }) => u.email === 'admin@hyperlabs.vn',
+      (u: { email: string }) => u.email === TEST_ADMIN.email,
     );
 
     const res = await request(getHttpServer(app))
@@ -81,6 +166,7 @@ describe('Permission Groups (e2e)', () => {
     expect(Array.isArray(res.body.effectivePermissionCodes)).toBe(true);
     expect(res.body.effectivePermissionCodes.length).toBeGreaterThan(0);
     expect(res.body.permissions).toBeDefined();
+    expect(String(res.body.note)).toMatch(/Super Admin/i);
   });
 
   it('PATCH organization positionPermission assigns group to org representative', async () => {

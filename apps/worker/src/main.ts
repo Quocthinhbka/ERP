@@ -15,39 +15,23 @@ import {
   runOrganizationExport,
   type ApplySelection,
 } from '@erp/organization-io';
-import { DEMO_QUEUE_NAME } from './constants.js';
 
 config({ path: resolve(__dirname, '../../../.env') });
 
 const redisHost = process.env.REDIS_HOST ?? 'localhost';
 const redisPort = Number(process.env.REDIS_PORT ?? 6380);
+const redisPassword = process.env.REDIS_PASSWORD || undefined;
 const storageDir = join(resolve(__dirname, '../../..'), 'tmp', 'organization-io');
 
 const connection = new Redis({
   host: redisHost,
   port: redisPort,
+  password: redisPassword,
   maxRetriesPerRequest: null,
 });
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
-
-const demoWorker = new Worker(
-  DEMO_QUEUE_NAME,
-  async (job) => {
-    const { message, enqueuedAt } = job.data as {
-      message: string;
-      enqueuedAt: string;
-    };
-
-    console.log(
-      `[${new Date().toISOString()}] Processing job ${job.id}: "${message}" (enqueued: ${enqueuedAt})`,
-    );
-
-    return { processedAt: new Date().toISOString(), message };
-  },
-  { connection },
-);
 
 const orgIoWorker = new Worker(
   ORG_IO_QUEUE_NAME,
@@ -74,24 +58,18 @@ const orgIoWorker = new Worker(
   { connection },
 );
 
-function attachLogs(worker: Worker, label: string) {
-  worker.on('completed', (job) => {
-    console.log(`[${label}] Job ${job.id} completed`);
-  });
-  worker.on('failed', (job, err) => {
-    console.error(`[${label}] Job ${job?.id} failed:`, err.message);
-  });
-}
-
-attachLogs(demoWorker, 'demo');
-attachLogs(orgIoWorker, 'organization-io');
+orgIoWorker.on('completed', (job) => {
+  console.log(`[organization-io] Job ${job.id} completed`);
+});
+orgIoWorker.on('failed', (job, err) => {
+  console.error(`[organization-io] Job ${job?.id} failed:`, err.message);
+});
 
 console.log(
-  `Worker started — queues "${DEMO_QUEUE_NAME}", "${ORG_IO_QUEUE_NAME}" (${redisHost}:${redisPort})`,
+  `Worker started — queue "${ORG_IO_QUEUE_NAME}" (${redisHost}:${redisPort})`,
 );
 
 async function shutdown() {
-  await demoWorker.close();
   await orgIoWorker.close();
   await prisma.$disconnect();
   await pool.end();

@@ -17,7 +17,7 @@ interface AccountDetail {
   id: string;
   email: string;
   fullName: string;
-  employeeCode: string | null;
+  accountCode: string;
   phone: string | null;
   linkedEmployeeProfileId: string | null;
   isActive: boolean;
@@ -98,7 +98,7 @@ export function AccountDetailPage() {
 
       <Card title="Thông tin tài khoản">
         <Descriptions column={2}>
-          <Descriptions.Item label="Mã NV">{account.employeeCode ?? '—'}</Descriptions.Item>
+          <Descriptions.Item label="Mã tài khoản">{account.accountCode}</Descriptions.Item>
           <Descriptions.Item label="SĐT">{account.phone ?? '—'}</Descriptions.Item>
           <Descriptions.Item label="Email">{account.email}</Descriptions.Item>
           <Descriptions.Item label="Họ tên">{account.fullName}</Descriptions.Item>
@@ -119,7 +119,11 @@ export function AccountDetailPage() {
           </Descriptions.Item>
           {permData && (
             <Descriptions.Item label="Quản trị hệ thống">
-              {permData.isSystemAdmin ? <Tag color="blue">Có</Tag> : <Tag>Không</Tag>}
+              {permData.isSystemAdmin ? (
+                <Tag color="blue">Super Admin — toàn quyền</Tag>
+              ) : (
+                <Tag>Không</Tag>
+              )}
             </Descriptions.Item>
           )}
         </Descriptions>
@@ -128,6 +132,13 @@ export function AccountDetailPage() {
       {permData && (
         <Card title="Quyền hiệu lực (chỉ xem)">
           <Typography.Paragraph type="secondary">{permData.note}</Typography.Paragraph>
+
+          {permData.isSystemAdmin && (
+            <Typography.Paragraph>
+              Tài khoản này nhận toàn bộ quyền hệ thống theo mặc định và không thể chỉnh sửa qua vai trò
+              hay vị trí tổ chức.
+            </Typography.Paragraph>
+          )}
 
           {permData.orgScopes.length > 0 && (
             <>
@@ -168,7 +179,7 @@ export function AccountDetailPage() {
 
           {effectiveCodes.size === 0 && !permData.isSystemAdmin && (
             <Typography.Text type="secondary">
-              Tài khoản chưa có quyền hiệu lực từ vị trí trên cây tổ chức.
+              Tài khoản chưa có quyền hiệu lực từ vai trò hoặc vị trí trên cây tổ chức.
             </Typography.Text>
           )}
         </Card>

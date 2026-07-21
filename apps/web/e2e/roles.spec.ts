@@ -1,12 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.getByTestId('login-identifier').fill('admin@hyperlabs.vn');
-  await page.getByTestId('login-password').fill('Admin@123');
-  await page.getByTestId('login-submit').click();
-  await expect(page.getByRole('heading', { name: 'Tổng quan' })).toBeVisible({ timeout: 10000 });
-}
+import { loginAsAdmin } from './helpers';
 
 test.describe('Roles page', () => {
   test('role form shows permission checkboxes grouped by module', async ({ page }) => {

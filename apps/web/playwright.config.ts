@@ -1,4 +1,9 @@
+import { resolve } from 'path';
 import { defineConfig, devices } from '@playwright/test';
+import { loadEnvFile } from './e2e/load-env';
+
+loadEnvFile(resolve(__dirname, '../../.env'));
+loadEnvFile(resolve(__dirname, '../../.env.local'), true);
 
 export default defineConfig({
   testDir: './e2e',

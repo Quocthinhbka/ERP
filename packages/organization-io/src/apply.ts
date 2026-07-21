@@ -67,16 +67,55 @@ export async function applyOrganizationSelections(
   };
 
   await prisma.$transaction(async (tx) => {
-    for (const item of toDelete.unitMembers) {
-      await tx.organizationUnitMember.deleteMany({ where: { id: item.entityId } });
-      deleted += 1;
-    }
-
     const unitDeleteOrdered = [...toDelete.units].sort((a, b) => {
       const depth = (id: string) =>
         current.units.find((u) => u.id === id)?.unitPath.split(' / ').length ?? 0;
       return depth(b.entityId) - depth(a.entityId);
     });
+
+    const positionHolders: Array<{
+      holderKind: 'ORGANIZATION_REP' | 'COMPANY_REP' | 'UNIT_MANAGER' | 'UNIT_MEMBER';
+      holderId: string;
+    }> = [];
+
+    for (const item of toDelete.unitMembers) {
+      positionHolders.push({ holderKind: 'UNIT_MEMBER', holderId: item.entityId });
+    }
+
+    for (const item of unitDeleteOrdered) {
+      positionHolders.push({ holderKind: 'UNIT_MANAGER', holderId: item.entityId });
+      for (const member of current.unitMembers.filter((m) => m.unitId === item.entityId)) {
+        positionHolders.push({ holderKind: 'UNIT_MEMBER', holderId: member.id });
+      }
+    }
+
+    for (const item of toDelete.companies) {
+      positionHolders.push({ holderKind: 'COMPANY_REP', holderId: item.entityId });
+      const companyUnits = current.units.filter((u) => u.companyId === item.entityId);
+      for (const unit of companyUnits) {
+        positionHolders.push({ holderKind: 'UNIT_MANAGER', holderId: unit.id });
+        for (const member of current.unitMembers.filter((m) => m.unitId === unit.id)) {
+          positionHolders.push({ holderKind: 'UNIT_MEMBER', holderId: member.id });
+        }
+      }
+    }
+
+    if (positionHolders.length > 0) {
+      await tx.positionPermission.deleteMany({
+        where: {
+          OR: positionHolders.map((h) => ({
+            holderKind: h.holderKind,
+            holderId: h.holderId,
+          })),
+        },
+      });
+    }
+
+    for (const item of toDelete.unitMembers) {
+      await tx.organizationUnitMember.deleteMany({ where: { id: item.entityId } });
+      deleted += 1;
+    }
+
     for (const item of unitDeleteOrdered) {
       await tx.organizationUnit.deleteMany({ where: { id: item.entityId } });
       deleted += 1;

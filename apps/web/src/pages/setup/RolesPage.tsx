@@ -102,6 +102,10 @@ export function RolesPage() {
     description?: string;
     permissionIds: string[];
   }) => {
+    if (editingRole?.isSystem) {
+      setModalOpen(false);
+      return;
+    }
     try {
       if (editingRole) {
         await api.patch(`/roles/${editingRole.id}`, {
@@ -168,9 +172,14 @@ export function RolesPage() {
             title: 'Thao tác',
             render: (_, record) => (
               <Space>
-                {hasPermission(Permissions.ROLE_UPDATE) && (
+                {hasPermission(Permissions.ROLE_UPDATE) && !record.isSystem && (
                   <Button size="small" onClick={() => openEdit(record)}>
                     Sửa
+                  </Button>
+                )}
+                {record.isSystem && (
+                  <Button size="small" onClick={() => openEdit(record)}>
+                    Xem
                   </Button>
                 )}
                 {hasPermission(Permissions.ROLE_DELETE) && !record.isSystem && (
@@ -185,12 +194,25 @@ export function RolesPage() {
       />
 
       <Modal
-        title={editingRole ? 'Sửa vai trò' : 'Thêm vai trò'}
+        title={
+          editingRole?.isSystem
+            ? `Xem vai trò${editingRole.code === 'super_admin' ? ' (Super Admin — không thể sửa)' : ' hệ thống'}`
+            : editingRole
+              ? 'Sửa vai trò'
+              : 'Thêm vai trò'
+        }
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
-        onOk={() => form.submit()}
+        onOk={() => (editingRole?.isSystem ? setModalOpen(false) : form.submit())}
+        okText={editingRole?.isSystem ? 'Đóng' : 'OK'}
+        cancelButtonProps={editingRole?.isSystem ? { style: { display: 'none' } } : undefined}
         destroyOnHidden
       >
+        {editingRole?.code === 'super_admin' && (
+          <Typography.Paragraph type="secondary">
+            Super Admin mặc định toàn quyền hệ thống và không thể thay đổi.
+          </Typography.Paragraph>
+        )}
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           {!editingRole && (
             <Form.Item name="code" label="Mã vai trò" rules={[{ required: true }]}>
@@ -198,25 +220,29 @@ export function RolesPage() {
             </Form.Item>
           )}
           <Form.Item name="name" label="Tên vai trò" rules={[{ required: true }]}>
-            <Input />
+            <Input disabled={!!editingRole?.isSystem} />
           </Form.Item>
           <Form.Item name="description" label="Mô tả">
-            <Input.TextArea rows={2} />
+            <Input.TextArea rows={2} disabled={!!editingRole?.isSystem} />
           </Form.Item>
           <Form.Item
             name="permissionIds"
             label="Quyền hạn"
-            rules={[
-              {
-                required: true,
-                type: 'array',
-                min: 1,
-                message: 'Chọn ít nhất một quyền',
-              },
-            ]}
+            rules={
+              editingRole?.isSystem
+                ? []
+                : [
+                    {
+                      required: true,
+                      type: 'array',
+                      min: 1,
+                      message: 'Chọn ít nhất một quyền',
+                    },
+                  ]
+            }
           >
             <Checkbox.Group
-              disabled={editingRole?.isSystem}
+              disabled={!!editingRole?.isSystem}
               data-testid="role-permissions"
               style={{ width: '100%' }}
             >
