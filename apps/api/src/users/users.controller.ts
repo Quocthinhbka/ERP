@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { Permissions } from '@erp/shared';
 import { UsersService } from './users.service';
-import { CreateUserDto } from '../auth/dto/auth.dto';
+import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard, PermissionsGuard, RequirePermissions } from '../common/guards/auth.guard';
 
@@ -30,6 +30,12 @@ export class UsersController {
     const pageNum = Math.max(Number(page) || 1, 1);
     const size = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
     return this.usersService.findAll(pageNum, size, search);
+  }
+
+  @Get('available-employee-profiles')
+  @RequirePermissions(Permissions.USER_CREATE)
+  findAvailableEmployeeProfiles() {
+    return this.usersService.findAvailableEmployeeProfiles();
   }
 
   @Get(':id/permissions')

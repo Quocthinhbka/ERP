@@ -10,7 +10,7 @@ import {
 export class UpdateUserDto {
   @IsOptional()
   @IsEmail()
-  email?: string;
+  email?: string | null;
 
   @IsOptional()
   @IsString()

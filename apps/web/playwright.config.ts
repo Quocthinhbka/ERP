@@ -1,6 +1,9 @@
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { defineConfig, devices } from '@playwright/test';
 import { loadEnvFile } from './e2e/load-env';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 loadEnvFile(resolve(__dirname, '../../.env'));
 loadEnvFile(resolve(__dirname, '../../.env.local'), true);

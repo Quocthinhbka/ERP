@@ -1,0 +1,31 @@
+# Mẫu cấu hình nginx cho ERP.
+# Copy tới /etc/nginx/sites-available/erp rồi symlink sang sites-enabled và `nginx -s reload`.
+# Nhớ đổi server_name và (khuyến nghị) bật HTTPS bằng certbot.
+
+server {
+    listen 80;
+    server_name erp.example.com;   # <-- đổi domain của bạn
+
+    # Static build của apps/web (khớp WEB_ROOT trong scripts/deploy.sh).
+    root /var/www/erp;
+    index index.html;
+
+    # SPA fallback: mọi route đều trả index.html cho React Router.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy API sang NestJS (PM2 erp-api, cổng API_PORT, mặc định 3000).
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    client_max_body_size 10m;
+}

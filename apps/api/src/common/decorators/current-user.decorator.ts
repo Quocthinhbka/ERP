@@ -3,7 +3,9 @@ import { OrgScopeNode, PermissionCode } from '@erp/shared';
 
 export interface RequestUser {
   id: string;
-  email: string;
+  email: string | null;
+  fullName: string;
+  mustChangePassword: boolean;
   permissions: PermissionCode[];
   isSystemAdmin: boolean;
   orgScopes: OrgScopeNode[];

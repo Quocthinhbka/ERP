@@ -16,7 +16,7 @@ type PrismaLike = PrismaClient;
 
 function toLinkedProfile(user: {
   accountCode: string;
-  email: string;
+  email: string | null;
   fullName: string;
 } | null): LinkedProfileRef | null {
   if (!user) return null;

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, MinLength, IsEmail, IsArray } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, MinLength, IsEmail } from 'class-validator';
 
 export class LoginDto {
   @IsString()
@@ -35,23 +35,12 @@ export class RefreshTokenDto {
   refreshToken?: string;
 }
 
-export class CreateUserDto {
-  @IsEmail()
-  email!: string;
+export class ChangePasswordDto {
+  @IsString()
+  @MinLength(8)
+  currentPassword!: string;
 
   @IsString()
   @MinLength(8)
-  password!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  fullName!: string;
-
-  @IsOptional()
-  @IsString()
-  phone?: string;
-
-  @IsArray()
-  @IsString({ each: true })
-  roleIds!: string[];
+  newPassword!: string;
 }

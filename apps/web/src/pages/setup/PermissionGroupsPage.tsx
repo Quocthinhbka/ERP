@@ -57,6 +57,7 @@ interface PositionItem {
 const MODULE_LABELS: Record<string, string> = {
   setup: 'Thiết lập',
   user: 'Tài khoản',
+  hr: 'Nhân sự',
   role: 'Vai trò',
   permission_group: 'Nhóm quyền',
   organization: 'Tổ chức',

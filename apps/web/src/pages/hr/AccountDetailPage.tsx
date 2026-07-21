@@ -15,12 +15,13 @@ import { api } from '../../lib/api';
 
 interface AccountDetail {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
   accountCode: string;
   phone: string | null;
   linkedEmployeeProfileId: string | null;
   isActive: boolean;
+  mustChangePassword: boolean;
   roles: Array<{ id: string; code: string; name: string }>;
 }
 
@@ -47,6 +48,7 @@ interface EffectivePermissions {
 const MODULE_LABELS: Record<string, string> = {
   setup: 'Thiết lập',
   user: 'Tài khoản',
+  hr: 'Nhân sự',
   role: 'Vai trò',
   permission_group: 'Nhóm quyền',
   organization: 'Tổ chức',
@@ -92,7 +94,7 @@ export function AccountDetailPage() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/setup/accounts')}>
+      <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/hr/accounts')}>
         Quay lại
       </Button>
 
@@ -100,11 +102,19 @@ export function AccountDetailPage() {
         <Descriptions column={2}>
           <Descriptions.Item label="Mã tài khoản">{account.accountCode}</Descriptions.Item>
           <Descriptions.Item label="SĐT">{account.phone ?? '—'}</Descriptions.Item>
-          <Descriptions.Item label="Email">{account.email}</Descriptions.Item>
+          <Descriptions.Item label="Email">{account.email ?? '—'}</Descriptions.Item>
           <Descriptions.Item label="Họ tên">{account.fullName}</Descriptions.Item>
           <Descriptions.Item label="Hồ sơ liên kết">
             {account.linkedEmployeeProfileId ? (
-              <Tag color="green">Đã liên kết (HR)</Tag>
+              <Button
+                type="link"
+                style={{ padding: 0 }}
+                onClick={() =>
+                  navigate(`/hr/employees/${account.linkedEmployeeProfileId}`)
+                }
+              >
+                Xem hồ sơ nhân viên
+              </Button>
             ) : (
               <Tag>Chưa có — module HR sẽ bổ sung</Tag>
             )}
@@ -116,6 +126,13 @@ export function AccountDetailPage() {
           </Descriptions.Item>
           <Descriptions.Item label="Trạng thái">
             {account.isActive ? <Tag color="green">Hoạt động</Tag> : <Tag color="red">Khóa</Tag>}
+          </Descriptions.Item>
+          <Descriptions.Item label="Đổi mật khẩu lần đầu">
+            {account.mustChangePassword ? (
+              <Tag color="orange">Đang chờ</Tag>
+            ) : (
+              <Tag color="green">Đã hoàn tất</Tag>
+            )}
           </Descriptions.Item>
           {permData && (
             <Descriptions.Item label="Quản trị hệ thống">

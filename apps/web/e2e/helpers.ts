@@ -1,6 +1,9 @@
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { loadEnvFile } from './load-env';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 loadEnvFile(resolve(__dirname, '../../../.env'));
 loadEnvFile(resolve(__dirname, '../../../.env.local'), true);
@@ -31,7 +34,9 @@ export async function ensureTestAdmin(request: APIRequestContext) {
       phone: TEST_ADMIN.phone,
     },
   });
-  if (![200, 403].includes(res.status())) {
+  // 429 có thể xảy ra khi các Playwright worker bootstrap song song;
+  // worker đầu tiên đã tạo admin hoặc DB đã có admin.
+  if (![200, 403, 429].includes(res.status())) {
     throw new Error(`Bootstrap failed: ${res.status()} ${await res.text()}`);
   }
 }

@@ -4,12 +4,14 @@ import type { MenuProps } from 'antd';
 import {
   ApartmentOutlined,
   DashboardOutlined,
+  IdcardOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   TeamOutlined,
   SafetyCertificateOutlined,
   KeyOutlined,
   LogoutOutlined,
+  SolutionOutlined,
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { Permissions } from '@erp/shared';
@@ -246,6 +248,41 @@ function CollapsedNav({
 }
 
 function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permissions]) => boolean): NavNode[] {
+  const items: NavNode[] = [
+    {
+      key: 'nav-dashboard',
+      icon: <DashboardOutlined />,
+      label: 'Tổng quan',
+      path: '/',
+    },
+  ];
+
+  const hrChildren: NavNode[] = [];
+  if (hasPermission(Permissions.USER_VIEW)) {
+    hrChildren.push({
+      key: 'nav-accounts',
+      icon: <TeamOutlined />,
+      label: 'Tài khoản',
+      path: '/hr/accounts',
+    });
+  }
+  if (hasPermission(Permissions.HR_EMPLOYEE_VIEW) || hasPermission(Permissions.HR_VIEW)) {
+    hrChildren.push({
+      key: 'nav-employees',
+      icon: <IdcardOutlined />,
+      label: 'Sơ yếu lý lịch',
+      path: '/hr/employees',
+    });
+  }
+  if (hrChildren.length > 0) {
+    items.push({
+      key: 'hr',
+      icon: <SolutionOutlined />,
+      label: 'Nhân sự',
+      children: hrChildren,
+    });
+  }
+
   const setupChildren: NavNode[] = [];
 
   if (hasPermission(Permissions.ORGANIZATION_VIEW)) {
@@ -274,14 +311,6 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
       path: '/setup/permission-groups',
     });
   }
-  if (hasPermission(Permissions.USER_VIEW)) {
-    permissionChildren.push({
-      key: 'nav-accounts',
-      icon: <TeamOutlined />,
-      label: 'Tài khoản',
-      path: '/setup/accounts',
-    });
-  }
   if (hasPermission(Permissions.PERMISSION_VIEW)) {
     permissionChildren.push({
       key: 'nav-permissions',
@@ -299,15 +328,6 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
       children: permissionChildren,
     });
   }
-
-  const items: NavNode[] = [
-    {
-      key: 'nav-dashboard',
-      icon: <DashboardOutlined />,
-      label: 'Tổng quan',
-      path: '/',
-    },
-  ];
 
   if (
     setupChildren.length > 0 &&

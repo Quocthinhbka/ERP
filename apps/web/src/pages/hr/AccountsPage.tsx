@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Form,
@@ -21,12 +22,13 @@ import { useAuth } from '../../contexts/AuthContext';
 
 interface AccountItem {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string;
   accountCode: string;
   phone: string | null;
   linkedEmployeeProfileId: string | null;
   isActive: boolean;
+  mustChangePassword: boolean;
   isSuperAdmin?: boolean;
   roles: Array<{ id: string; code: string; name: string }>;
 }
@@ -35,6 +37,14 @@ interface RoleOption {
   id: string;
   code: string;
   name: string;
+}
+
+interface EmployeeProfileOption {
+  id: string;
+  profileCode: string;
+  fullName: string;
+  phone: string;
+  email: string;
 }
 
 function isSuperAdminAccount(account: AccountItem) {
@@ -48,6 +58,9 @@ export function AccountsPage() {
   const { hasPermission } = useAuth();
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [employeeProfiles, setEmployeeProfiles] = useState<
+    EmployeeProfileOption[]
+  >([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountItem | null>(null);
@@ -61,12 +74,18 @@ export function AccountsPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [usersRes, rolesRes] = await Promise.all([
+      const [usersRes, rolesRes, profilesRes] = await Promise.all([
         api.get<{ items: AccountItem[] }>('/users'),
         api.get<RoleOption[]>('/roles'),
+        hasPermission(Permissions.USER_CREATE)
+          ? api.get<EmployeeProfileOption[]>(
+              '/users/available-employee-profiles',
+            )
+          : Promise.resolve({ data: [] as EmployeeProfileOption[] }),
       ]);
       setAccounts(usersRes.data.items);
       setRoles(rolesRes.data);
+      setEmployeeProfiles(profilesRes.data);
     } finally {
       setLoading(false);
     }
@@ -98,6 +117,11 @@ export function AccountsPage() {
     try {
       if (editingAccount) {
         const payload = { ...values };
+        if (editingAccount.linkedEmployeeProfileId) {
+          delete payload.fullName;
+          delete payload.phone;
+          delete payload.email;
+        }
         if (isSuperAdminAccount(editingAccount)) {
           delete payload.roleIds;
           delete payload.isActive;
@@ -121,7 +145,7 @@ export function AccountsPage() {
       return;
     }
     Modal.confirm({
-      title: `Xóa tài khoản "${account.email}"?`,
+      title: `Xóa tài khoản "${account.accountCode}"?`,
       onOk: async () => {
         await api.delete(`/users/${account.id}`);
         message.success('Đã xóa tài khoản');
@@ -149,8 +173,9 @@ export function AccountsPage() {
         dataSource={accounts}
         columns={[
           { title: 'Mã tài khoản', dataIndex: 'accountCode' },
+          { title: 'Họ và tên', dataIndex: 'fullName' },
           { title: 'SĐT', dataIndex: 'phone', render: (v) => v ?? '—' },
-          { title: 'Email', dataIndex: 'email' },
+          { title: 'Email', dataIndex: 'email', render: (v) => v ?? '—' },
           {
             title: 'Hồ sơ liên kết',
             dataIndex: 'linkedEmployeeProfileId',
@@ -168,6 +193,9 @@ export function AccountsPage() {
                   </Tag>
                 ))}
                 {isSuperAdminAccount(record) && <Tag color="gold">Full quyền</Tag>}
+                {record.mustChangePassword && (
+                  <Tag color="orange">Chờ đổi mật khẩu</Tag>
+                )}
               </Space>
             ),
           },
@@ -181,7 +209,7 @@ export function AccountsPage() {
             title: 'Thao tác',
             render: (_, record) => (
               <Space>
-                <Link to={`/setup/accounts/${record.id}`}>
+                <Link to={`/hr/accounts/${record.id}`}>
                   <Button size="small">Xem chi tiết</Button>
                 </Link>
                 {hasPermission(Permissions.USER_UPDATE) && (
@@ -216,29 +244,50 @@ export function AccountsPage() {
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           {!editingAccount && (
             <>
-              <Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="password" label="Mật khẩu" rules={[{ required: true, min: 8 }]}>
-                <Input.Password />
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="Mã tài khoản lấy theo mã hồ sơ. Mật khẩu mặc định là 8 số cuối SĐT và người dùng phải đổi ngay lần đăng nhập đầu."
+              />
+              <Form.Item
+                name="employeeProfileId"
+                label="Hồ sơ nhân viên"
+                rules={[
+                  { required: true, message: 'Chọn hồ sơ nhân viên' },
+                ]}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Chọn hồ sơ chưa có tài khoản"
+                  options={employeeProfiles.map((profile) => ({
+                    value: profile.id,
+                    label: `${profile.profileCode} — ${profile.fullName} — ${profile.phone} — ${profile.email}`,
+                  }))}
+                />
               </Form.Item>
             </>
           )}
-          <Form.Item name="fullName" label="Họ tên" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
+          {editingAccount && (
+            <Form.Item name="fullName" label="Họ tên" rules={[{ required: true }]}>
+              <Input disabled={Boolean(editingAccount.linkedEmployeeProfileId)} />
+            </Form.Item>
+          )}
           {editingAccount && (
             <Form.Item label="Mã tài khoản">
               <Input value={editingAccount.accountCode} disabled />
             </Form.Item>
           )}
-          <Form.Item name="phone" label="Số điện thoại">
-            <Input />
-          </Form.Item>
+          {editingAccount && (
+            <Form.Item name="phone" label="Số điện thoại">
+              <Input disabled={Boolean(editingAccount.linkedEmployeeProfileId)} />
+            </Form.Item>
+          )}
           {editingAccount && (
             <>
               <Form.Item name="email" label="Email" rules={[{ type: 'email' }]}>
-                <Input />
+                <Input disabled={Boolean(editingAccount.linkedEmployeeProfileId)} />
               </Form.Item>
               <Form.Item name="isActive" label="Hoạt động" valuePropName="checked">
                 <Switch disabled={editingSuperAdmin} />

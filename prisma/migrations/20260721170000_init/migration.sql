@@ -7,16 +7,20 @@ CREATE TYPE "EntityStatus" AS ENUM ('ACTIVE', 'INACTIVE');
 -- CreateEnum
 CREATE TYPE "PositionHolderKind" AS ENUM ('ORGANIZATION_REP', 'COMPANY_REP', 'UNIT_MANAGER', 'UNIT_MEMBER');
 
+-- CreateEnum
+CREATE TYPE "EmployeeGender" AS ENUM ('MALE', 'FEMALE', 'OTHER');
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
-    "email" TEXT NOT NULL,
+    "email" TEXT,
     "password_hash" TEXT NOT NULL,
     "full_name" TEXT NOT NULL,
     "account_code" TEXT NOT NULL,
     "phone" TEXT,
     "linked_employee_profile_id" TEXT,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "must_change_password" BOOLEAN NOT NULL DEFAULT false,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -247,6 +251,82 @@ CREATE TABLE "organization_unit_members" (
     CONSTRAINT "organization_unit_members_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "employee_profiles" (
+    "id" TEXT NOT NULL,
+    "profile_code" TEXT NOT NULL,
+    "full_name" TEXT NOT NULL,
+    "gender" "EmployeeGender" NOT NULL,
+    "birth_date" DATE NOT NULL,
+    "birth_place" TEXT NOT NULL,
+    "place_of_origin" TEXT NOT NULL,
+    "permanent_address" TEXT NOT NULL,
+    "current_address" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "ethnicity" TEXT NOT NULL,
+    "religion" TEXT,
+    "identity_number" TEXT NOT NULL,
+    "identity_issued_date" DATE NOT NULL,
+    "identity_issued_place" TEXT NOT NULL,
+    "education_level" TEXT NOT NULL,
+    "youth_union_admission_date" DATE,
+    "youth_union_admission_place" TEXT,
+    "party_admission_date" DATE,
+    "party_admission_place" TEXT,
+    "reward_discipline" TEXT,
+    "strengths" TEXT,
+    "status" "EntityStatus" NOT NULL DEFAULT 'ACTIVE',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "employee_profiles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "employee_family_members" (
+    "id" TEXT NOT NULL,
+    "employee_profile_id" TEXT NOT NULL,
+    "relationship" TEXT NOT NULL,
+    "full_name" TEXT NOT NULL,
+    "birth_year" INTEGER,
+    "current_residence" TEXT,
+    "occupation" TEXT,
+    "workplace" TEXT,
+    "sort_order" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "employee_family_members_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "employee_education_histories" (
+    "id" TEXT NOT NULL,
+    "employee_profile_id" TEXT NOT NULL,
+    "from_month" DATE NOT NULL,
+    "to_month" DATE NOT NULL,
+    "institution" TEXT NOT NULL,
+    "major" TEXT NOT NULL,
+    "training_mode" TEXT NOT NULL,
+    "degree" TEXT NOT NULL,
+    "sort_order" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "employee_education_histories_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "employee_work_histories" (
+    "id" TEXT NOT NULL,
+    "employee_profile_id" TEXT NOT NULL,
+    "from_month" DATE NOT NULL,
+    "to_month" DATE,
+    "company" TEXT NOT NULL,
+    "department" TEXT,
+    "position" TEXT NOT NULL,
+    "sort_order" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "employee_work_histories_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
@@ -255,6 +335,9 @@ CREATE UNIQUE INDEX "users_account_code_key" ON "users"("account_code");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "users_phone_key" ON "users"("phone");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_linked_employee_profile_id_key" ON "users"("linked_employee_profile_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "refresh_tokens_token_hash_key" ON "refresh_tokens"("token_hash");
@@ -282,6 +365,45 @@ CREATE UNIQUE INDEX "position_permissions_holder_kind_holder_id_key" ON "positio
 
 -- CreateIndex
 CREATE UNIQUE INDEX "position_permission_parent_scopes_position_permission_id_no_key" ON "position_permission_parent_scopes"("position_permission_id", "node_type", "node_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "employee_profiles_profile_code_key" ON "employee_profiles"("profile_code");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "employee_profiles_phone_key" ON "employee_profiles"("phone");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "employee_profiles_email_key" ON "employee_profiles"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "employee_profiles_identity_number_key" ON "employee_profiles"("identity_number");
+
+-- CreateIndex
+CREATE INDEX "employee_profiles_full_name_idx" ON "employee_profiles"("full_name");
+
+-- CreateIndex
+CREATE INDEX "employee_profiles_phone_idx" ON "employee_profiles"("phone");
+
+-- CreateIndex
+CREATE INDEX "employee_profiles_email_idx" ON "employee_profiles"("email");
+
+-- CreateIndex
+CREATE INDEX "employee_profiles_identity_number_idx" ON "employee_profiles"("identity_number");
+
+-- CreateIndex
+CREATE INDEX "employee_profiles_status_idx" ON "employee_profiles"("status");
+
+-- CreateIndex
+CREATE INDEX "employee_family_members_employee_profile_id_idx" ON "employee_family_members"("employee_profile_id");
+
+-- CreateIndex
+CREATE INDEX "employee_education_histories_employee_profile_id_idx" ON "employee_education_histories"("employee_profile_id");
+
+-- CreateIndex
+CREATE INDEX "employee_work_histories_employee_profile_id_idx" ON "employee_work_histories"("employee_profile_id");
+
+-- AddForeignKey
+ALTER TABLE "users" ADD CONSTRAINT "users_linked_employee_profile_id_fkey" FOREIGN KEY ("linked_employee_profile_id") REFERENCES "employee_profiles"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -354,3 +476,16 @@ ALTER TABLE "organization_unit_members" ADD CONSTRAINT "organization_unit_member
 
 -- AddForeignKey
 ALTER TABLE "organization_unit_members" ADD CONSTRAINT "organization_unit_members_linked_profile_user_id_fkey" FOREIGN KEY ("linked_profile_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "employee_family_members" ADD CONSTRAINT "employee_family_members_employee_profile_id_fkey" FOREIGN KEY ("employee_profile_id") REFERENCES "employee_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "employee_education_histories" ADD CONSTRAINT "employee_education_histories_employee_profile_id_fkey" FOREIGN KEY ("employee_profile_id") REFERENCES "employee_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "employee_work_histories" ADD CONSTRAINT "employee_work_histories_employee_profile_id_fkey" FOREIGN KEY ("employee_profile_id") REFERENCES "employee_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+
+-- Sequence for HS-xxxxx profile codes
+CREATE SEQUENCE IF NOT EXISTS "employee_profile_code_seq" START WITH 1 INCREMENT BY 1;

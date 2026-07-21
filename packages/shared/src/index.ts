@@ -1,6 +1,7 @@
 export enum PermissionModule {
   SETUP = 'setup',
   USER = 'user',
+  HR = 'hr',
   ROLE = 'role',
   PERMISSION_GROUP = 'permission_group',
   ORGANIZATION = 'organization',
@@ -10,6 +11,111 @@ export enum EntityStatus {
   ACTIVE = 'ACTIVE',
   INACTIVE = 'INACTIVE',
 }
+
+export enum EmployeeGender {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  OTHER = 'OTHER',
+}
+
+export enum FamilyRelationship {
+  FATHER = 'FATHER',
+  MOTHER = 'MOTHER',
+  BROTHER = 'BROTHER',
+  SISTER = 'SISTER',
+  YOUNGER_BROTHER = 'YOUNGER_BROTHER',
+  YOUNGER_SISTER = 'YOUNGER_SISTER',
+  GUARDIAN = 'GUARDIAN',
+}
+
+export enum TrainingMode {
+  REGULAR = 'REGULAR',
+  IN_SERVICE = 'IN_SERVICE',
+  BRIDGE = 'BRIDGE',
+  SECOND_DEGREE = 'SECOND_DEGREE',
+  MASTER = 'MASTER',
+  OTHER = 'OTHER',
+}
+
+export enum EducationLevel {
+  GRADE_5 = 'GRADE_5',
+  GRADE_9 = 'GRADE_9',
+  GRADE_12 = 'GRADE_12',
+  COLLEGE = 'COLLEGE',
+  UNIVERSITY = 'UNIVERSITY',
+  POSTGRADUATE = 'POSTGRADUATE',
+  OTHER = 'OTHER',
+}
+
+export enum Religion {
+  NONE = 'NONE',
+  BUDDHISM = 'BUDDHISM',
+  CATHOLICISM = 'CATHOLICISM',
+  PROTESTANTISM = 'PROTESTANTISM',
+  CAO_DAI = 'CAO_DAI',
+  HOA_HAO = 'HOA_HAO',
+  ISLAM = 'ISLAM',
+  OTHER = 'OTHER',
+}
+
+export const ETHNICITIES = [
+  'Kinh',
+  'Tay',
+  'Thai',
+  'Muong',
+  'Khmer',
+  'Hoa',
+  'Nung',
+  'Hmong',
+  'Dao',
+  'Gia Rai',
+  'E De',
+  'Ba Na',
+  'San Chay',
+  'Cham',
+  'Co Ho',
+  'Xo Dang',
+  'San Diu',
+  'Hrê',
+  'Ra Glai',
+  'Mnong',
+  'Tho',
+  'Stieng',
+  'Kho Mu',
+  'Bru Van Kieu',
+  'Co Tu',
+  'Giay',
+  'Ta Oi',
+  'Ma',
+  'Co',
+  'Cho Ro',
+  'Xinh Mun',
+  'Ha Nhi',
+  'Chu Ru',
+  'Lao',
+  'La Chi',
+  'Khang',
+  'Phu La',
+  'La Hu',
+  'La Ha',
+  'Pà Then',
+  'Lự',
+  'Ngai',
+  'Chứt',
+  'Lô Lô',
+  'Mảng',
+  'Cơ Lao',
+  'Bố Y',
+  'Cống',
+  'Si La',
+  'Pu Péo',
+  'Brâu',
+  'Ơ Đu',
+  'Rơ Măm',
+  'Người nước ngoài',
+] as const;
+
+export type Ethnicity = (typeof ETHNICITIES)[number];
 
 export enum OrgNodeType {
   ORGANIZATION = 'organization',
@@ -51,6 +157,11 @@ export const Permissions = {
   USER_CREATE: 'user:create',
   USER_UPDATE: 'user:update',
   USER_DELETE: 'user:delete',
+  HR_VIEW: 'hr:view',
+  HR_EMPLOYEE_VIEW: 'hr:employee:view',
+  HR_EMPLOYEE_CREATE: 'hr:employee:create',
+  HR_EMPLOYEE_UPDATE: 'hr:employee:update',
+  HR_EMPLOYEE_DELETE: 'hr:employee:delete',
   ROLE_VIEW: 'role:view',
   ROLE_CREATE: 'role:create',
   ROLE_UPDATE: 'role:update',
@@ -88,7 +199,7 @@ export type JwtTokenType = 'access' | 'refresh';
 
 export interface JwtPayload {
   sub: string;
-  email: string;
+  email?: string | null;
   typ: JwtTokenType;
   /** Chỉ có trên refresh token — dùng để rotate/revoke. */
   jti?: string;

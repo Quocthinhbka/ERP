@@ -11,8 +11,16 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { BootstrapAdminDto, LoginDto, RefreshTokenDto } from './dto/auth.dto';
-import { JwtAuthGuard } from '../common/guards/auth.guard';
+import {
+  BootstrapAdminDto,
+  ChangePasswordDto,
+  LoginDto,
+  RefreshTokenDto,
+} from './dto/auth.dto';
+import {
+  AllowPasswordChangeRequired,
+  JwtAuthGuard,
+} from '../common/guards/auth.guard';
 import { CurrentUser, RequestUser } from '../common/decorators/current-user.decorator';
 import { REFRESH_COOKIE, clearAuthCookies, setAuthCookies } from './auth-cookies';
 
@@ -92,8 +100,28 @@ export class AuthController {
   }
 
   @Get('me')
+  @AllowPasswordChangeRequired()
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: RequestUser) {
     return user;
+  }
+
+  @Post('change-password')
+  @HttpCode(200)
+  @AllowPasswordChangeRequired()
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.changePassword(user.id, dto);
+    setAuthCookies(
+      res,
+      result,
+      this.authService.accessExpiresIn,
+      this.authService.refreshExpiresIn,
+    );
+    return result;
   }
 }

@@ -15,12 +15,13 @@ test.describe('Login flow', () => {
 
   test('login with account code redirects to dashboard', async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto('/setup/accounts');
+    await page.goto('/hr/accounts');
     await expect(page.getByText('Mã tài khoản')).toBeVisible();
     const accountCode = await page.getByText(/^TK-\d{5}$/).first().textContent();
     expect(accountCode).toBeTruthy();
 
-    await page.goto('/login');
+    await page.getByRole('button', { name: 'Đăng xuất' }).click();
+    await expect(page.getByTestId('login-form')).toBeVisible();
     await page.getByTestId('login-identifier').fill(accountCode!);
     await page.getByTestId('login-password').fill(TEST_ADMIN.password);
     await page.getByTestId('login-submit').click();

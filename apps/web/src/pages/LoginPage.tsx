@@ -12,7 +12,9 @@ export function LoginPage() {
 
   useEffect(() => {
     if (user) {
-      navigate('/', { replace: true });
+      navigate(user.mustChangePassword ? '/change-password' : '/', {
+        replace: true,
+      });
     }
   }, [user, navigate]);
 
@@ -23,9 +25,15 @@ export function LoginPage() {
   const onFinish = async (values: LoginValues) => {
     setLoading(true);
     try {
-      await login({ identifier: values.identifier.trim(), password: values.password });
+      const loggedInUser = await login({
+        identifier: values.identifier.trim(),
+        password: values.password,
+      });
       message.success('Đăng nhập thành công');
-      navigate('/');
+      navigate(
+        loggedInUser.mustChangePassword ? '/change-password' : '/',
+        { replace: true },
+      );
     } catch (error: unknown) {
       const status =
         error && typeof error === 'object' && 'response' in error

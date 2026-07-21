@@ -1,13 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EntityStatus } from '@prisma/client';
 import { SystemRole } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { PositionPermissionsService } from '../organization/position-permissions.service';
-import { CreateUserDto } from '../auth/dto/auth.dto';
+import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
@@ -51,6 +53,23 @@ export class UsersService {
     };
   }
 
+  async findAvailableEmployeeProfiles() {
+    return this.prisma.employeeProfile.findMany({
+      where: {
+        status: EntityStatus.ACTIVE,
+        linkedUser: { is: null },
+      },
+      orderBy: { profileCode: 'asc' },
+      select: {
+        id: true,
+        profileCode: true,
+        fullName: true,
+        phone: true,
+        email: true,
+      },
+    });
+  }
+
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -67,23 +86,59 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
-    await this.authService.ensureEmailAvailable(dto.email);
-    if (dto.phone) {
-      await this.authService.ensurePhoneAvailable(dto.phone);
+    const profile = await this.prisma.employeeProfile.findUnique({
+      where: { id: dto.employeeProfileId },
+      include: { linkedUser: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Employee profile not found');
     }
+    if (profile.status !== EntityStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Không thể tạo tài khoản cho hồ sơ đã ngừng hoạt động',
+      );
+    }
+    if (profile.linkedUser) {
+      throw new ConflictException('Hồ sơ nhân viên đã được liên kết tài khoản');
+    }
+
+    const phone = this.normalizePhone(profile.phone);
+    if (phone.length < 8) {
+      throw new BadRequestException(
+        'Số điện thoại hồ sơ phải có ít nhất 8 chữ số',
+      );
+    }
+    await this.authService.ensurePhoneAvailable(phone);
+    await this.authService.ensureEmailAvailable(profile.email);
     await this.rejectSuperAdminRoleAssignment(dto.roleIds);
 
-    const passwordHash = await this.authService.hashPassword(dto.password);
+    const profileCodeMatch = /^HS-(\d{5})$/.exec(profile.profileCode);
+    if (!profileCodeMatch) {
+      throw new BadRequestException('Mã hồ sơ nhân viên không hợp lệ');
+    }
+    const accountCode = `TK-${profileCodeMatch[1]}`;
+    const accountCodeExists = await this.prisma.user.findUnique({
+      where: { accountCode },
+      select: { id: true },
+    });
+    if (accountCodeExists) {
+      throw new ConflictException(
+        `Mã tài khoản ${accountCode} đã được sử dụng`,
+      );
+    }
+    const defaultPassword = phone.slice(-8);
+    const passwordHash = await this.authService.hashPassword(defaultPassword);
 
     const user = await this.prisma.$transaction(async (tx) => {
-      const accountCode = await this.authService.allocateNextAccountCode(tx);
       return tx.user.create({
         data: {
-          email: dto.email.toLowerCase(),
-          fullName: dto.fullName,
+          email: profile.email,
+          fullName: profile.fullName,
           accountCode,
-          phone: dto.phone,
+          phone,
           passwordHash,
+          linkedEmployeeProfileId: profile.id,
+          mustChangePassword: true,
           roles: {
             create: dto.roleIds.map((roleId) => ({ roleId })),
           },
@@ -123,6 +178,17 @@ export class UsersService {
       }
     }
 
+    if (
+      existing.linkedEmployeeProfileId &&
+      (dto.fullName !== undefined ||
+        dto.phone !== undefined ||
+        dto.email !== undefined)
+    ) {
+      throw new BadRequestException(
+        'Họ tên, số điện thoại và email phải được cập nhật từ hồ sơ nhân viên',
+      );
+    }
+
     if (dto.email) {
       await this.authService.ensureEmailAvailable(dto.email, id);
     }
@@ -134,14 +200,16 @@ export class UsersService {
     }
 
     const data: {
-      email?: string;
+      email?: string | null;
       fullName?: string;
       phone?: string | null;
       passwordHash?: string;
       isActive?: boolean;
     } = {};
 
-    if (dto.email !== undefined) data.email = dto.email.toLowerCase();
+    if (dto.email !== undefined) {
+      data.email = dto.email ? dto.email.toLowerCase() : null;
+    }
     if (dto.fullName !== undefined) data.fullName = dto.fullName;
     if (dto.phone !== undefined) data.phone = dto.phone || null;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
@@ -219,12 +287,13 @@ export class UsersService {
 
   private toResponse(user: {
     id: string;
-    email: string;
+    email: string | null;
     fullName: string;
     isActive: boolean;
     accountCode: string;
     phone: string | null;
     linkedEmployeeProfileId: string | null;
+    mustChangePassword: boolean;
     createdAt: Date;
     updatedAt: Date;
     roles: Array<{ role: { id: string; code: string; name: string } }>;
@@ -238,6 +307,7 @@ export class UsersService {
       accountCode: user.accountCode,
       phone: user.phone,
       linkedEmployeeProfileId: user.linkedEmployeeProfileId,
+      mustChangePassword: user.mustChangePassword,
       isSuperAdmin,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -247,5 +317,9 @@ export class UsersService {
         name: r.role.name,
       })),
     };
+  }
+
+  private normalizePhone(phone: string) {
+    return phone.replace(/\D/g, '');
   }
 }

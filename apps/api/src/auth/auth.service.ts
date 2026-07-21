@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -11,13 +12,15 @@ import {
   AuthTokens,
   formatAccountCode,
   JwtPayload,
-  OrgScopeNode,
   parseAccountCodeSequence,
-  PermissionCode,
   SystemRole,
 } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
-import { BootstrapAdminDto, LoginDto } from './dto/auth.dto';
+import {
+  BootstrapAdminDto,
+  ChangePasswordDto,
+  LoginDto,
+} from './dto/auth.dto';
 import { PositionPermissionsService } from '../organization/position-permissions.service';
 import {
   durationToMs,
@@ -54,20 +57,7 @@ export class AuthService {
     );
   }
 
-  async login(
-    dto: LoginDto,
-  ): Promise<
-    AuthTokens & {
-      user: {
-        id: string;
-        email: string;
-        fullName: string;
-        permissions: PermissionCode[];
-        isSystemAdmin: boolean;
-        orgScopes: OrgScopeNode[];
-      };
-    }
-  > {
+  async login(dto: LoginDto) {
     const user = await this.findUserForLogin(dto);
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid credentials');
@@ -78,20 +68,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const auth = await this.positionPermissions.resolveAuthContext(user.id);
-    const tokens = await this.generateTokens(user.id, user.email);
-
-    return {
-      ...tokens,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        permissions: auth.permissions,
-        isSystemAdmin: auth.isSystemAdmin,
-        orgScopes: auth.orgScopes,
-      },
-    };
+    return this.issueSession(user);
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
@@ -181,6 +158,8 @@ export class AuthService {
     return {
       id: user.id,
       email: user.email,
+      fullName: user.fullName,
+      mustChangePassword: user.mustChangePassword,
       permissions: auth.permissions,
       isSystemAdmin: auth.isSystemAdmin,
       orgScopes: auth.orgScopes,
@@ -189,6 +168,39 @@ export class AuthService {
 
   async hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, 10);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
+    const currentPasswordValid = await bcrypt.compare(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+    if (!currentPasswordValid) {
+      throw new BadRequestException('Mật khẩu hiện tại không đúng');
+    }
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('Mật khẩu mới phải khác mật khẩu hiện tại');
+    }
+
+    const passwordHash = await this.hashPassword(dto.newPassword);
+    const updatedUser = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, mustChangePassword: false },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return updated;
+    });
+
+    return this.issueSession(updatedUser);
   }
 
   /**
@@ -229,7 +241,7 @@ export class AuthService {
       },
     });
 
-    return this.login({ identifier: user.email, password: dto.password });
+    return this.login({ identifier: email, password: dto.password });
   }
 
   async ensureEmailAvailable(email: string, excludeUserId?: string) {
@@ -303,7 +315,32 @@ export class AuthService {
     return phone.replace(/[\s\-().]/g, '');
   }
 
-  private async generateTokens(userId: string, email: string): Promise<AuthTokens> {
+  private async issueSession(user: {
+    id: string;
+    email: string | null;
+    fullName: string;
+    mustChangePassword: boolean;
+  }) {
+    const auth = await this.positionPermissions.resolveAuthContext(user.id);
+    const tokens = await this.generateTokens(user.id, user.email);
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        mustChangePassword: user.mustChangePassword,
+        permissions: auth.permissions,
+        isSystemAdmin: auth.isSystemAdmin,
+        orgScopes: auth.orgScopes,
+      },
+    };
+  }
+
+  private async generateTokens(
+    userId: string,
+    email: string | null,
+  ): Promise<AuthTokens> {
     const accessToken = await this.jwtService.signAsync(
       {
         sub: userId,

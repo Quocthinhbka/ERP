@@ -1,0 +1,33 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    name: Deploy to server
+    needs: test
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Deploy (build + migrate + pm2 + nginx)
+        run: bash scripts/deploy.sh
+        env:
+          # Đường dẫn file .env production trên máy chủ (nằm ngoài repo để không bị ghi đè).
+          ENV_FILE: ${{ vars.DEPLOY_ENV_FILE }}
+          # Thư mục nginx phục vụ static build của web.
+          WEB_ROOT: ${{ vars.DEPLOY_WEB_ROOT }}
+          # Đặt "true" nếu muốn deploy.sh tự reload nginx (cần sudo không mật khẩu).
+          RELOAD_NGINX: ${{ vars.DEPLOY_RELOAD_NGINX }}

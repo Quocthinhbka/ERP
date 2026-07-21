@@ -12,6 +12,7 @@ import { HealthModule } from './health/health.module';
 import { QueueModule } from './queue/queue.module';
 import { OrganizationModule } from './organization/organization.module';
 import { PermissionGroupsModule } from './permission-groups/permission-groups.module';
+import { EmployeesModule } from './employees/employees.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { PermissionGroupsModule } from './permission-groups/permission-groups.mo
     QueueModule,
     OrganizationModule,
     PermissionGroupsModule,
+    EmployeesModule,
   ],
   providers: [
     {

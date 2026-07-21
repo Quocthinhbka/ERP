@@ -2,17 +2,21 @@ import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import { Permissions } from '@erp/shared';
 import { createTestApp, getHttpServer, loginAsAdmin } from './test-utils';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Setup / Permissions (e2e)', () => {
   let app: INestApplication;
   let accessToken: string;
+  let prisma: PrismaService;
   let roleId: string;
   let permissionIds: string[];
   let createdUserId: string;
+  let createdEmployeeId: string;
   let createdRoleId: string;
 
   beforeAll(async () => {
     app = await createTestApp();
+    prisma = app.get(PrismaService);
     accessToken = await loginAsAdmin(app);
 
     const roles = await request(getHttpServer(app))
@@ -38,6 +42,11 @@ describe('Setup / Permissions (e2e)', () => {
       await request(getHttpServer(app))
         .delete(`/api/users/${createdUserId}`)
         .set('Authorization', `Bearer ${accessToken}`);
+    }
+    if (createdEmployeeId) {
+      await prisma.employeeProfile.deleteMany({
+        where: { id: createdEmployeeId },
+      });
     }
     if (createdRoleId) {
       await request(getHttpServer(app))
@@ -95,19 +104,43 @@ describe('Setup / Permissions (e2e)', () => {
   });
 
   it('POST /api/users creates user', async () => {
-    const email = `test_${Date.now()}@hyperlabs.vn`;
+    const suffix = String(Date.now()).slice(-8);
+    const email = `perm${suffix}@example.com`;
+    const employee = await request(getHttpServer(app))
+      .post('/api/employees')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        fullName: 'Test User',
+        gender: 'MALE',
+        birthDate: '1990-01-01',
+        birthPlace: 'Ha Noi',
+        placeOfOrigin: 'Ha Noi',
+        permanentAddress: 'Dia chi thuong tru',
+        currentAddress: 'Dia chi hien tai',
+        phone: `06${suffix}`,
+        email,
+        ethnicity: 'Kinh',
+        identityNumber: `01234567${suffix.slice(-4)}`.padStart(12, '0').slice(-12),
+        identityIssuedDate: '2018-01-01',
+        identityIssuedPlace: 'Cuc CSQLHC',
+        educationLevel: 'UNIVERSITY',
+      })
+      .expect(201);
+    createdEmployeeId = employee.body.id;
+
     const res = await request(getHttpServer(app))
       .post('/api/users')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        email,
-        password: 'Test@1234',
-        fullName: 'Test User',
+        employeeProfileId: createdEmployeeId,
         roleIds: [roleId],
       })
       .expect(201);
 
     expect(res.body.email).toBe(email);
+    expect(res.body.accountCode).toBe(
+      employee.body.profileCode.replace('HS-', 'TK-'),
+    );
     createdUserId = res.body.id;
   });
 

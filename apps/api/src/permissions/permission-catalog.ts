@@ -43,6 +43,36 @@ export const PERMISSION_CATALOG: Array<{
     description: 'Xóa người dùng',
   },
   {
+    code: Permissions.HR_VIEW,
+    name: 'Xem nhân sự',
+    module: PermissionModule.HR,
+    description: 'Truy cập module nhân sự',
+  },
+  {
+    code: Permissions.HR_EMPLOYEE_VIEW,
+    name: 'Xem hồ sơ nhân viên',
+    module: PermissionModule.HR,
+    description: 'Xem danh sách hồ sơ nhân viên',
+  },
+  {
+    code: Permissions.HR_EMPLOYEE_CREATE,
+    name: 'Tạo hồ sơ nhân viên',
+    module: PermissionModule.HR,
+    description: 'Tạo hồ sơ nhân viên mới',
+  },
+  {
+    code: Permissions.HR_EMPLOYEE_UPDATE,
+    name: 'Cập nhật hồ sơ nhân viên',
+    module: PermissionModule.HR,
+    description: 'Cập nhật thông tin hồ sơ nhân viên',
+  },
+  {
+    code: Permissions.HR_EMPLOYEE_DELETE,
+    name: 'Khóa hồ sơ nhân viên',
+    module: PermissionModule.HR,
+    description: 'Chuyển hồ sơ nhân viên sang trạng thái không hoạt động',
+  },
+  {
     code: Permissions.ROLE_VIEW,
     name: 'Xem vai trò',
     module: PermissionModule.ROLE,

@@ -12,8 +12,9 @@ import { api, setMemoryAccessToken } from '../lib/api';
 
 interface AuthUser {
   id: string;
-  email: string;
+  email: string | null;
   fullName?: string;
+  mustChangePassword: boolean;
   permissions: PermissionCode[];
   isSystemAdmin?: boolean;
   orgScopes?: OrgScopeNode[];
@@ -27,7 +28,11 @@ export interface LoginCredentials {
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<AuthUser>;
+  changePassword: (values: {
+    currentPassword: string;
+    newPassword: string;
+  }) => Promise<void>;
   logout: () => Promise<void>;
   hasPermission: (permission: PermissionCode) => boolean;
 }
@@ -61,7 +66,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setMemoryAccessToken(data.accessToken);
     setUser(data.user);
+    return data.user as AuthUser;
   }, []);
+
+  const changePassword = useCallback(
+    async (values: { currentPassword: string; newPassword: string }) => {
+      const { data } = await api.post('/auth/change-password', values);
+      if (!data?.user || !data?.accessToken) {
+        throw new Error('Phản hồi đổi mật khẩu không hợp lệ');
+      }
+      setMemoryAccessToken(data.accessToken);
+      setUser(data.user);
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     try {
@@ -81,8 +99,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, hasPermission }),
-    [user, loading, login, logout, hasPermission],
+    () => ({ user, loading, login, changePassword, logout, hasPermission }),
+    [user, loading, login, changePassword, logout, hasPermission],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
