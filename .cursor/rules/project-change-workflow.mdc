@@ -1,0 +1,45 @@
+---
+description: Quy trình thay đổi code và bắt buộc ghi Report cho toàn bộ repo ERP
+alwaysApply: true
+---
+
+# Quy trình thay đổi code & Report (bắt buộc)
+
+## Phạm vi
+
+Luật này áp dụng cho **toàn bộ repo** hiện tại. Hỏi đáp đơn giản (không sửa code) được trả lời ngay, không qua quy trình dưới đây.
+
+## Khi có yêu cầu cần thay đổi code — đúng thứ tự
+
+1. **Xác nhận lại yêu cầu** với người dùng.
+2. **Đưa ra các phương án thực hiện** (ưu/nhược, đề xuất 1 phương án).
+3. **Chờ xác nhận phương án** — chưa làm gì cho đến khi người dùng chọn.
+4. **Đánh giá độ phức tạp & rủi ro** của phương án đã chọn; liệt kê các bước thực hiện.
+5. **Chờ người dùng xác nhận thực hiện** — chưa sửa code cho đến khi được duyệt.
+6. **Thực hiện** đúng phương án đã duyệt.
+7. **Báo cáo tóm tắt** kết quả trong chat.
+8. **Ghi file report** (bắt buộc — xem mục dưới).
+
+Không bỏ qua bước chờ xác nhận (3 và 5), trừ khi người dùng trong cùng câu đã chọn phương án **và** bảo thực hiện (ví dụ: "thực hiện C").
+
+## Report bắt buộc sau mọi thay đổi code
+
+Sau khi có thay đổi code/config/docs liên quan yêu cầu:
+
+1. Tạo file mới:
+   `Documents/Reports/Report_YYYY-MM-DD_HH-MM-SS.md`
+   (timestamp theo giờ local máy thực hiện).
+
+2. Nội dung report tối thiểu gồm:
+   - **Yêu cầu thay đổi**: mô tả yêu cầu gốc
+   - **Việc đã thực hiện**: các thay đổi cụ thể (file, hành động)
+   - **Kết quả thực hiện**: thành công / hạn chế / cần follow-up
+
+3. Cập nhật chỉ mục trong:
+   `Documents/Reports/Report.md`
+   — thêm một dòng/tóm tắt trỏ tới file report vừa tạo (mới nhất ở trên cùng).
+
+## Không làm
+
+- Không sửa code trước khi qua bước 3 và 5 (trừ trường hợp người dùng đã bảo thực hiện rõ ràng).
+- Không bỏ bước ghi report sau khi đã thay đổi code.
