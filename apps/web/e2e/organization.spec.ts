@@ -1,17 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, TEST_ADMIN } from './helpers';
+import { getAdminAccessToken } from './helpers';
+import { getE2eApiBase } from './api-base';
 
 test.describe('Organization page', () => {
   test('shows organization tree page', async ({ page }) => {
-    await loginAsAdmin(page);
     await page.goto('/setup/organization');
-    await expect(page.getByText('Thiết lập / Tổ chức')).toBeVisible();
+    await expect(page.getByTestId('header-breadcrumb')).toContainText('Tổ chức');
     await expect(page.getByRole('tree')).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole('treeitem').first()).toBeVisible();
   });
 
   test('organization node can be edited', async ({ page }) => {
-    await loginAsAdmin(page);
     await page.goto('/setup/organization');
     await page.getByRole('treeitem').first().click();
     await expect(page.locator('button[title="Sửa"]')).toBeVisible();
@@ -21,11 +20,11 @@ test.describe('Organization page', () => {
   });
 
   test('company detail panel is read-only until edit is clicked', async ({ page }) => {
-    await loginAsAdmin(page);
     await page.goto('/setup/organization');
     await page.getByRole('treeitem').first().click();
-    page.once('dialog', (dialog) => dialog.accept('Công ty Playwright Test'));
     await page.getByRole('button', { name: 'Thêm công ty' }).click();
+    await page.getByTestId('org-name-input').fill('Công ty Playwright Test');
+    await page.getByRole('button', { name: 'Thêm', exact: true }).click();
     await expect(page.getByRole('treeitem').filter({ hasText: 'Công ty Playwright Test' }).first()).toBeVisible({
       timeout: 10000,
     });
@@ -38,20 +37,15 @@ test.describe('Organization page', () => {
   });
 
   test('shows import export buttons', async ({ page }) => {
-    await loginAsAdmin(page);
     await page.goto('/setup/organization');
-    await expect(page.getByRole('button', { name: 'Export Excel' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Import Excel' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Export' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Import' })).toBeVisible();
   });
 
   test('leaf unit employees appear on tree as position - name', async ({ page, request }) => {
     test.setTimeout(60000);
-    const apiBase = 'http://127.0.0.1:3000/api';
-    const login = await request.post(`${apiBase}/auth/login`, {
-      data: { identifier: TEST_ADMIN.email, password: TEST_ADMIN.password },
-    });
-    expect(login.ok()).toBeTruthy();
-    const { accessToken } = (await login.json()) as { accessToken: string };
+    const apiBase = getE2eApiBase();
+    const accessToken = await getAdminAccessToken(request);
     const headers = { Authorization: `Bearer ${accessToken}` };
 
     const companyName = `Công ty Leaf Emp ${Date.now()}`;
@@ -78,7 +72,6 @@ test.describe('Organization page', () => {
     });
     expect(memberRes.ok()).toBeTruthy();
 
-    await loginAsAdmin(page);
     await page.goto('/setup/organization');
     await expect(page.getByRole('tree')).toBeVisible({ timeout: 10000 });
     await page.getByRole('button', { name: 'Mở rộng' }).click();
@@ -91,5 +84,7 @@ test.describe('Organization page', () => {
     await expect(page.getByText('Chi tiết chức vụ')).toBeVisible();
     await expect(page.getByText('Nguyễn Văn A').first()).toBeVisible();
     await expect(page.getByText('Nhân viên').first()).toBeVisible();
+    await expect(page.locator('button[title="Sửa"]')).toBeVisible();
+    await expect(page.locator('button[title="Xóa"]')).toBeVisible();
   });
 });

@@ -2,12 +2,13 @@ import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import {
   createTestApp,
+  ensureTestManagingCompany,
   getHttpServer,
   loginAsAdmin,
 } from './test-utils';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-function personalPayload(suffix: string) {
+function personalPayload(suffix: string, managingCompanyId: string) {
   return {
     fullName: 'nguyễn văn kiểm thử',
     gender: 'MALE',
@@ -23,6 +24,8 @@ function personalPayload(suffix: string) {
     identityIssuedDate: '2020-01-15',
     identityIssuedPlace: 'Cục CSQLHC về TTXH',
     educationLevel: 'GRADE_12',
+    employmentStatus: 'OFFICIAL',
+    managingCompanyId,
   };
 }
 
@@ -31,12 +34,15 @@ describe('Employees (e2e)', () => {
   let token: string;
   let prisma: PrismaService;
   let employeeId: string;
+  let managingCompanyId: string;
   const suffix = String(Date.now()).slice(-8);
 
   beforeAll(async () => {
     app = await createTestApp();
     token = await loginAsAdmin(app);
     prisma = app.get(PrismaService);
+    const company = await ensureTestManagingCompany(app, token);
+    managingCompanyId = company.id;
   });
 
   afterAll(async () => {
@@ -55,20 +61,108 @@ describe('Employees (e2e)', () => {
     const response = await request(getHttpServer(app))
       .post('/api/employees')
       .set('Authorization', `Bearer ${token}`)
-      .send(personalPayload(suffix))
+      .send(personalPayload(suffix, managingCompanyId))
       .expect(201);
 
     employeeId = response.body.id;
     expect(response.body.profileCode).toMatch(/^HS-\d{5}$/);
     expect(response.body.fullName).toBe('NGUYỄN VĂN KIỂM THỬ');
     expect(response.body.email).toBe(`employee${suffix}@example.com`);
+    expect(response.body.status).toBe('INCOMPLETE');
+    expect(response.body.managingCompanyId).toBe(managingCompanyId);
     expect(response.body.familyMembers).toEqual([]);
+  });
+
+  it('lists employees filtered by statusIn', async () => {
+    const response = await request(getHttpServer(app))
+      .get('/api/employees')
+      .query({ statusIn: ['INCOMPLETE'], page: 1, pageSize: 50 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.items.length).toBeGreaterThan(0);
+    expect(
+      response.body.items.every(
+        (item: { status: string }) => item.status === 'INCOMPLETE',
+      ),
+    ).toBe(true);
+  });
+
+  it('lists employees filtered by managingCompanyIdIn', async () => {
+    const list = await request(getHttpServer(app))
+      .get('/api/employees')
+      .query({ page: 1, pageSize: 1 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const companyId = list.body.items?.[0]?.managingCompanyId as string | undefined;
+    expect(companyId).toBeTruthy();
+
+    const filtered = await request(getHttpServer(app))
+      .get('/api/employees')
+      .query({ managingCompanyIdIn: [companyId], page: 1, pageSize: 50 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(filtered.body.items.length).toBeGreaterThan(0);
+    expect(
+      filtered.body.items.every(
+        (item: { managingCompanyId: string }) => item.managingCompanyId === companyId,
+      ),
+    ).toBe(true);
+  });
+
+  it('check-or-create returns existing profile by phone', async () => {
+    let org = await prisma.organization.findFirst();
+    if (!org) {
+      org = await prisma.organization.create({ data: { name: 'Tổ chức' } });
+    }
+    let company = await prisma.company.findFirst({
+      where: { organizationId: org.id },
+      select: { id: true },
+    });
+    if (!company) {
+      company = await prisma.company.create({
+        data: { name: `E2E Company ${Date.now()}`, organizationId: org.id },
+        select: { id: true },
+      });
+    }
+
+    const created = await request(getHttpServer(app))
+      .post('/api/employees/check-or-create')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        fullName: 'hồ sơ trùng',
+        phone: `09${suffix}`,
+        managingCompanyId: company.id,
+      })
+      .expect(201);
+
+    expect(created.body.created).toBe(false);
+    expect(created.body.profile.id).toBe(employeeId);
+
+    const phone = `08${String(Date.now()).slice(-8)}`;
+    const fresh = await request(getHttpServer(app))
+      .post('/api/employees/check-or-create')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        fullName: 'hồ sơ mới dialog',
+        phone,
+        managingCompanyId: company.id,
+      })
+      .expect(201);
+
+    expect(fresh.body.created).toBe(true);
+    expect(fresh.body.profile.fullName).toBe('HỒ SƠ MỚI DIALOG');
+    expect(fresh.body.profile.status).toBe('INCOMPLETE');
+    expect(fresh.body.profile.managingCompanyId).toBe(company.id);
+    await prisma.employeeProfile.delete({ where: { id: fresh.body.profile.id } });
   });
 
   it('lists and searches employee profiles', async () => {
     const response = await request(getHttpServer(app))
       .get('/api/employees')
-      .query({ search: `employee${suffix}@example.com`, page: 1, pageSize: 10 })
+      .query({ search: `09${suffix}`, page: 1, pageSize: 10 })
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -185,12 +279,84 @@ describe('Employees (e2e)', () => {
       .expect(200);
   });
 
-  it('requires mandatory personal fields', async () => {
+  it('requires phone and managing company when creating draft profile', async () => {
     await request(getHttpServer(app))
       .post('/api/employees')
       .set('Authorization', `Bearer ${token}`)
-      .send({ fullName: 'THIẾU THÔNG TIN' })
+      .send({ fullName: 'THIẾU SỐ ĐIỆN THOẠI', managingCompanyId })
       .expect(400);
+
+    await request(getHttpServer(app))
+      .post('/api/employees')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        fullName: 'THIẾU CÔNG TY',
+        phone: `07${String(Date.now()).slice(-8)}`,
+      })
+      .expect(400);
+
+    const draftPhone = `07${String(Date.now()).slice(-8)}`;
+    const draft = await request(getHttpServer(app))
+      .post('/api/employees')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        fullName: 'hồ sơ nháp',
+        phone: draftPhone,
+        managingCompanyId,
+      })
+      .expect(201);
+    expect(draft.body.status).toBe('INCOMPLETE');
+    expect(draft.body.managingCompanyId).toBe(managingCompanyId);
+    await prisma.employeeProfile.delete({ where: { id: draft.body.id } });
+  });
+
+  it('completes declaration and allows HR verify transitions', async () => {
+    // Hồ sơ chính đã có family/education/work từ các test trước — Lưu sẽ auto Chờ xác nhận.
+    const completed = await request(getHttpServer(app))
+      .post(`/api/employees/${employeeId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    expect(completed.body.status).toBe('PENDING_REVIEW');
+
+    const verified = await request(getHttpServer(app))
+      .patch(`/api/employees/${employeeId}/status`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'VERIFIED' })
+      .expect(200);
+    expect(verified.body.status).toBe('VERIFIED');
+  });
+
+  it('uploads, lists and deletes employee documents', async () => {
+    const uploaded = await request(getHttpServer(app))
+      .post(`/api/employees/${employeeId}/documents`)
+      .set('Authorization', `Bearer ${token}`)
+      .field('documentType', 'IDENTITY')
+      .field('name', 'CCCD nhân viên')
+      .attach('file', Buffer.from('%PDF-1.4 test'), {
+        filename: 'cccd.pdf',
+        contentType: 'application/pdf',
+      })
+      .expect(201);
+
+    expect(uploaded.body.name).toBe('CCCD nhân viên');
+    expect(uploaded.body.fileUrl).toContain('/uploads/employee-documents/');
+
+    const listed = await request(getHttpServer(app))
+      .get(`/api/employees/${employeeId}/documents`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(listed.body).toHaveLength(1);
+
+    await request(getHttpServer(app))
+      .delete(`/api/employees/${employeeId}/documents/${uploaded.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(
+      await prisma.employeeDocument.count({
+        where: { employeeProfileId: employeeId },
+      }),
+    ).toBe(0);
   });
 
   it('soft-deletes the employee profile', async () => {
@@ -199,6 +365,83 @@ describe('Employees (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    expect(response.body.status).toBe('INACTIVE');
+    expect(response.body.status).toBe('LOCKED');
+  });
+
+  it('only hard-deletes the employee profile outside production', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      await request(getHttpServer(app))
+        .delete(`/api/employees/${employeeId}/hard`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+    } finally {
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+
+    await request(getHttpServer(app))
+      .delete(`/api/employees/${employeeId}/hard`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(
+      await prisma.employeeProfile.findUnique({ where: { id: employeeId } }),
+    ).toBeNull();
+    expect(
+      await prisma.employeeFamilyMember.count({
+        where: { employeeProfileId: employeeId },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.employeeEducationHistory.count({
+        where: { employeeProfileId: employeeId },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.employeeWorkHistory.count({
+        where: { employeeProfileId: employeeId },
+      }),
+    ).toBe(0);
+    employeeId = '';
+  });
+
+  it('uploads and removes employee avatar', async () => {
+    const created = await request(getHttpServer(app))
+      .post('/api/employees')
+      .set('Authorization', `Bearer ${token}`)
+      .send(personalPayload(`${String(Date.now()).slice(-8)}`, managingCompanyId))
+      .expect(201);
+    const id = created.body.id as string;
+
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+
+    const uploaded = await request(getHttpServer(app))
+      .post(`/api/employees/${id}/avatar`)
+      .set('Authorization', `Bearer ${token}`)
+      .attach('avatar', png, { filename: 'avatar.png', contentType: 'image/png' })
+      .expect(201);
+
+    expect(uploaded.body.avatarUrl).toMatch(
+      new RegExp(`^/uploads/employees/${id}/avatar\\.png$`),
+    );
+
+    const removed = await request(getHttpServer(app))
+      .delete(`/api/employees/${id}/avatar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(removed.body.avatarUrl).toBeNull();
+
+    await request(getHttpServer(app))
+      .delete(`/api/employees/${id}/hard`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
   });
 });

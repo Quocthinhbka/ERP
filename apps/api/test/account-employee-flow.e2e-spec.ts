@@ -1,14 +1,14 @@
 import { INestApplication } from '@nestjs/common';
-import { SystemRole } from '@erp/shared';
 import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   createTestApp,
+  ensureTestManagingCompany,
   getHttpServer,
   loginAsAdmin,
 } from './test-utils';
 
-function personalPayload(suffix: string) {
+function personalPayload(suffix: string, managingCompanyId: string) {
   return {
     fullName: 'nhân viên tài khoản',
     gender: 'FEMALE',
@@ -24,6 +24,7 @@ function personalPayload(suffix: string) {
     identityIssuedDate: '2019-08-01',
     identityIssuedPlace: 'Cục CSQLHC về TTXH',
     educationLevel: 'UNIVERSITY',
+    managingCompanyId,
   };
 }
 
@@ -56,20 +57,24 @@ describe('Account linked to employee profile (e2e)', () => {
   });
 
   it('creates an account from a profile and enforces first-login password change', async () => {
+    const company = await ensureTestManagingCompany(app, adminToken);
     const employeeResponse = await request(getHttpServer(app))
       .post('/api/employees')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send(personalPayload(suffix))
+      .send(personalPayload(suffix, company.id))
       .expect(201);
     employeeId = employeeResponse.body.id;
 
-    const adminRole = await prisma.role.findUniqueOrThrow({
-      where: { code: SystemRole.ADMIN },
+    // Hồ sơ bất kỳ (kể cả nháp) đều có thể tạo tài khoản liên kết.
+    await prisma.employeeProfile.update({
+      where: { id: employeeId },
+      data: { status: 'INCOMPLETE' },
     });
+
     const accountResponse = await request(getHttpServer(app))
       .post('/api/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ employeeProfileId: employeeId, roleIds: [adminRole.id] })
+      .send({ employeeProfileId: employeeId })
       .expect(201);
     userId = accountResponse.body.id;
 
@@ -94,15 +99,22 @@ describe('Account linked to employee profile (e2e)', () => {
         expect(body.code).toBe('PASSWORD_CHANGE_REQUIRED');
       });
 
+    // Lần đầu: không cần mật khẩu hiện tại.
     const changedResponse = await request(getHttpServer(app))
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${loginResponse.body.accessToken}`)
-      .send({ currentPassword: defaultPassword, newPassword })
+      .send({ newPassword })
       .expect(200);
     expect(changedResponse.body.user.mustChangePassword).toBe(false);
 
+    // Tài khoản thường chưa gắn vị trí → không có quyền HR; hồ sơ cá nhân vẫn xem được.
     await request(getHttpServer(app))
       .get(`/api/employees/${employeeId}`)
+      .set('Authorization', `Bearer ${changedResponse.body.accessToken}`)
+      .expect(403);
+
+    await request(getHttpServer(app))
+      .get('/api/personal/profile')
       .set('Authorization', `Bearer ${changedResponse.body.accessToken}`)
       .expect(200);
   });
@@ -128,11 +140,17 @@ describe('Account linked to employee profile (e2e)', () => {
     expect(linkedUser.email).toBe(updatedEmail);
   });
 
-  it('blocks direct email update on linked account', async () => {
+  it('allows direct account contact update and syncs to linked profile', async () => {
+    const nextEmail = `direct${String(Date.now()).slice(-8)}@example.com`;
     await request(getHttpServer(app))
       .patch(`/api/users/${userId}`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'direct-edit@example.com' })
-      .expect(400);
+      .send({ email: nextEmail })
+      .expect(200);
+
+    const profile = await prisma.employeeProfile.findUniqueOrThrow({
+      where: { id: employeeId },
+    });
+    expect(profile.email).toBe(nextEmail);
   });
 });

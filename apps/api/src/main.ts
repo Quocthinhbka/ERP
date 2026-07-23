@@ -1,12 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { existsSync } from 'fs';
+import { mkdir } from 'fs/promises';
+import { resolve } from 'path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
 
   app.use(
@@ -17,6 +21,17 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
+
+  // Ảnh đại diện nằm ngoài prefix /api để nginx/vite proxy được /uploads/*
+  const uploadsRoot = resolve(process.cwd(), '../..', 'uploads');
+  if (!existsSync(uploadsRoot)) {
+    await mkdir(uploadsRoot, { recursive: true });
+  }
+  app.useStaticAssets(uploadsRoot, {
+    prefix: '/uploads/',
+    fallthrough: true,
+  });
+
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({

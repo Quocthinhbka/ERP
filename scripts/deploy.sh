@@ -46,6 +46,7 @@ pnpm exec prisma generate
 echo "==> Build shared packages"
 pnpm --filter @erp/shared build
 pnpm --filter @erp/organization-io build
+pnpm --filter @erp/employee-io build
 
 # --- 4. Migrate database ----------------------------------------------------
 echo "==> Prisma migrate deploy"
@@ -61,6 +62,15 @@ pnpm --filter @erp/web build
 echo "==> Publish web -> $WEB_ROOT"
 mkdir -p "$WEB_ROOT"
 rsync -a --delete "$ROOT/apps/web/dist/" "$WEB_ROOT/"
+
+# Ảnh đại diện: giữ uploads trong repo, symlink để nginx phục vụ /uploads/
+UPLOADS_DIR="${UPLOADS_DIR:-$ROOT/uploads}"
+UPLOADS_WEB_ROOT="${UPLOADS_WEB_ROOT:-/var/www/erp-uploads}"
+mkdir -p "$UPLOADS_DIR"
+if [ ! -e "$UPLOADS_WEB_ROOT" ] && [ ! -L "$UPLOADS_WEB_ROOT" ]; then
+  ln -sfn "$UPLOADS_DIR" "$UPLOADS_WEB_ROOT" || true
+fi
+echo "==> Uploads:  $UPLOADS_DIR (nginx alias: $UPLOADS_WEB_ROOT)"
 
 if [ "$RELOAD_NGINX" = "true" ]; then
   echo "==> Reload nginx"

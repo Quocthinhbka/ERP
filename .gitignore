@@ -35,12 +35,14 @@ Thumbs.db
 test-results/
 playwright-report/
 blob-report/
+e2e/.auth/
 playwright/.cache/
 
 # Local runtime / uploads
 tmp/
 uploads/
 prisma/generated/
+.local/
 
 # IDE
 .idea/

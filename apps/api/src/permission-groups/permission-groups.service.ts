@@ -10,6 +10,16 @@ import {
   UpdatePermissionGroupDto,
 } from './dto/permission-group.dto';
 
+const groupInclude = {
+  versions: {
+    orderBy: { versionNumber: 'asc' },
+    include: {
+      permissions: { include: { permission: true } },
+      _count: { select: { positionPermissions: true } },
+    },
+  },
+} as const;
+
 @Injectable()
 export class PermissionGroupsService {
   constructor(
@@ -19,22 +29,15 @@ export class PermissionGroupsService {
 
   async findAll() {
     const groups = await this.prisma.permissionGroup.findMany({
+      where: { deletedAt: null },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
-      include: {
-        permissions: { include: { permission: true } },
-        versions: {
-          orderBy: { versionNumber: 'asc' },
-          include: {
-            permissions: true,
-            _count: { select: { positionPermissions: true } },
-          },
-        },
-      },
+      include: groupInclude,
     });
 
     return groups.map((group) => {
       const defaultVersion = group.versions.find((v) => v.versionNumber === 0);
       const customVersions = group.versions.filter((v) => v.isCustom);
+      const defaultPermissions = defaultVersion?.permissions ?? [];
       const defaultPositionCount = defaultVersion?._count.positionPermissions ?? 0;
 
       return {
@@ -43,13 +46,13 @@ export class PermissionGroupsService {
         name: group.name,
         description: group.description,
         isDefault: group.isDefault,
-        permissionCount: group.permissions.length,
+        permissionCount: defaultPermissions.length,
         positionCount: group.versions.reduce(
           (sum, v) => sum + v._count.positionPermissions,
           0,
         ),
         permissions: this.groupPermissionsByModule(
-          group.permissions.map((p) => p.permission),
+          defaultPermissions.map((p) => p.permission),
         ),
         versions: [
           {
@@ -57,7 +60,7 @@ export class PermissionGroupsService {
             name: group.name,
             versionNumber: 0,
             isCustom: false,
-            permissionCount: group.permissions.length,
+            permissionCount: defaultPermissions.length,
             positionCount: defaultPositionCount,
           },
           ...customVersions.map((v) => ({
@@ -83,25 +86,19 @@ export class PermissionGroupsService {
       where: { id: versionId },
       include: {
         permissions: { include: { permission: true } },
-        permissionGroup: {
-          include: { permissions: { include: { permission: true } } },
-        },
       },
     });
     if (!version) {
       throw new NotFoundException('Permission group version not found');
     }
 
-    const permissions =
-      version.versionNumber === 0
-        ? version.permissionGroup.permissions.map((p) => p.permission)
-        : version.permissions.map((p) => p.permission);
-
     return {
       versionId: version.id,
       name: version.name,
       isCustom: version.isCustom,
-      permissions: this.groupPermissionsByModule(permissions),
+      permissions: this.groupPermissionsByModule(
+        version.permissions.map((p) => p.permission),
+      ),
     };
   }
 
@@ -127,8 +124,12 @@ export class PermissionGroupsService {
       where: { code: dto.code },
     });
     if (existing) {
-      throw new BadRequestException('Permission group code already exists');
+      throw new BadRequestException('Mã nhóm quyền đã tồn tại');
     }
+
+    const permissionIds = await this.ensurePermissionIdsExist(
+      dto.permissionIds ?? [],
+    );
 
     const group = await this.prisma.$transaction(async (tx) => {
       const created = await tx.permissionGroup.create({
@@ -139,15 +140,6 @@ export class PermissionGroupsService {
         },
       });
 
-      if (dto.permissionIds.length > 0) {
-        await tx.permissionGroupPermission.createMany({
-          data: dto.permissionIds.map((permissionId) => ({
-            permissionGroupId: created.id,
-            permissionId,
-          })),
-        });
-      }
-
       const version = await tx.permissionGroupVersion.create({
         data: {
           permissionGroupId: created.id,
@@ -157,9 +149,9 @@ export class PermissionGroupsService {
         },
       });
 
-      if (dto.permissionIds.length > 0) {
+      if (permissionIds.length > 0) {
         await tx.permissionGroupVersionPermission.createMany({
-          data: dto.permissionIds.map((permissionId) => ({
+          data: permissionIds.map((permissionId) => ({
             versionId: version.id,
             permissionId,
           })),
@@ -174,6 +166,9 @@ export class PermissionGroupsService {
 
   async update(id: string, dto: UpdatePermissionGroupDto) {
     await this.getGroupOrThrow(id);
+    const permissionIds = dto.permissionIds
+      ? await this.ensurePermissionIdsExist(dto.permissionIds)
+      : undefined;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.permissionGroup.update({
@@ -184,38 +179,28 @@ export class PermissionGroupsService {
         },
       });
 
-      if (dto.permissionIds) {
-        await tx.permissionGroupPermission.deleteMany({ where: { permissionGroupId: id } });
-        if (dto.permissionIds.length > 0) {
-          await tx.permissionGroupPermission.createMany({
-            data: dto.permissionIds.map((permissionId) => ({
-              permissionGroupId: id,
-              permissionId,
-            })),
-          });
-        }
-
-        const defaultVersion = await tx.permissionGroupVersion.findFirst({
-          where: { permissionGroupId: id, versionNumber: 0 },
-        });
-        if (defaultVersion) {
+      const defaultVersion = await tx.permissionGroupVersion.findFirst({
+        where: { permissionGroupId: id, versionNumber: 0 },
+      });
+      if (defaultVersion && (dto.name || permissionIds)) {
+        if (permissionIds) {
           await tx.permissionGroupVersionPermission.deleteMany({
             where: { versionId: defaultVersion.id },
           });
-          if (dto.permissionIds.length > 0) {
+          if (permissionIds.length > 0) {
             await tx.permissionGroupVersionPermission.createMany({
-              data: dto.permissionIds.map((permissionId) => ({
+              data: permissionIds.map((permissionId) => ({
                 versionId: defaultVersion.id,
                 permissionId,
               })),
             });
           }
-          if (dto.name) {
-            await tx.permissionGroupVersion.update({
-              where: { id: defaultVersion.id },
-              data: { name: dto.name },
-            });
-          }
+        }
+        if (dto.name) {
+          await tx.permissionGroupVersion.update({
+            where: { id: defaultVersion.id },
+            data: { name: dto.name },
+          });
         }
       }
     });
@@ -238,16 +223,26 @@ export class PermissionGroupsService {
     return { success: true };
   }
 
+  private async ensurePermissionIdsExist(permissionIds: string[]) {
+    const uniqueIds = [...new Set(permissionIds)];
+    if (uniqueIds.length === 0) return uniqueIds;
+
+    const found = await this.prisma.permission.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true },
+    });
+    if (found.length !== uniqueIds.length) {
+      throw new BadRequestException(
+        'Danh sách quyền không hợp lệ hoặc đã thay đổi. Tải lại trang rồi chọn lại quyền.',
+      );
+    }
+    return uniqueIds;
+  }
+
   private async getGroupOrThrow(id: string) {
     const group = await this.prisma.permissionGroup.findUnique({
       where: { id },
-      include: {
-        permissions: { include: { permission: true } },
-        versions: {
-          orderBy: { versionNumber: 'asc' },
-          include: { _count: { select: { positionPermissions: true } } },
-        },
-      },
+      include: groupInclude,
     });
     if (!group) {
       throw new NotFoundException('Permission group not found');
@@ -257,27 +252,28 @@ export class PermissionGroupsService {
 
   private toGroupDetail(group: Awaited<ReturnType<typeof this.getGroupOrThrow>>) {
     const defaultVersion = group.versions.find((v) => v.versionNumber === 0);
+    const defaultPermissions = defaultVersion?.permissions ?? [];
     return {
       id: group.id,
       code: group.code,
       name: group.name,
       description: group.description,
       isDefault: group.isDefault,
-      permissionCount: group.permissions.length,
+      permissionCount: defaultPermissions.length,
       positionCount: group.versions.reduce(
         (sum, v) => sum + v._count.positionPermissions,
         0,
       ),
-      permissionIds: group.permissions.map((p) => p.permissionId),
+      permissionIds: defaultPermissions.map((p) => p.permissionId),
       permissions: this.groupPermissionsByModule(
-        group.permissions.map((p) => p.permission),
+        defaultPermissions.map((p) => p.permission),
       ),
       versions: group.versions.map((v) => ({
         id: v.id,
         name: v.name,
         versionNumber: v.versionNumber,
         isCustom: v.isCustom,
-        permissionCount: v.isCustom ? undefined : group.permissions.length,
+        permissionCount: v.permissions.length,
         positionCount: v._count.positionPermissions,
       })),
       defaultVersionId: defaultVersion?.id ?? null,

@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "dev": "nest start --watch",
+    "dev": "NODE_ENV=development nest start --watch",
     "start": "node dist/main.js",
     "test": "jest --config test/jest-e2e.config.ts --runInBand"
   },
   "dependencies": {
+    "@erp/employee-io": "workspace:^",
     "@erp/organization-io": "workspace:^",
     "@erp/shared": "workspace:*",
     "@nestjs/common": "^11.0.0",

@@ -74,16 +74,16 @@ export class OrganizationMemberDto {
   @IsOptional()
   @IsString()
   additionalInfo?: string;
-}
 
-export class CompanyMemberDto extends OrganizationMemberDto {}
-
-export class UnitMemberDto extends OrganizationMemberDto {
   @IsOptional()
   @ValidateNested()
   @Type(() => PositionPermissionInputDto)
   positionPermission?: PositionPermissionInputDto | null;
 }
+
+export class CompanyMemberDto extends OrganizationMemberDto {}
+
+export class UnitMemberDto extends OrganizationMemberDto {}
 
 export class UpdateOrganizationDto {
   @IsOptional()
@@ -294,4 +294,10 @@ export class ApplySelectionDto {
   @IsString()
   @IsNotEmpty()
   selectionKey!: string;
+}
+
+export class ExportOrganizationDto {
+  @IsOptional()
+  @IsIn(['excel', 'json'])
+  format?: 'excel' | 'json';
 }

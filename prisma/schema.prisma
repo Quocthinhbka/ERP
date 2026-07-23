@@ -16,6 +16,8 @@ enum PositionHolderKind {
   COMPANY_REP
   UNIT_MANAGER
   UNIT_MEMBER
+  ORGANIZATION_MEMBER
+  COMPANY_MEMBER
 }
 
 enum EmployeeGender {
@@ -24,28 +26,80 @@ enum EmployeeGender {
   OTHER
 }
 
-model User {
-  id                         String                   @id @default(uuid())
-  email                      String?                  @unique
-  passwordHash               String                   @map("password_hash")
-  fullName                   String                   @map("full_name")
-  accountCode                String                   @unique @map("account_code")
-  phone                      String?                  @unique
-  linkedEmployeeProfileId    String?                  @unique @map("linked_employee_profile_id")
-  isActive                   Boolean                  @default(true) @map("is_active")
-  mustChangePassword         Boolean                  @default(false) @map("must_change_password")
-  createdAt                  DateTime                 @default(now()) @map("created_at")
-  updatedAt                  DateTime                 @updatedAt @map("updated_at")
-  roles                      UserRole[]
-  refreshTokens              RefreshToken[]
-  organizationLinkedProfiles Organization[]           @relation("OrgLinkedProfile")
-  organizationMemberProfiles OrganizationMember[]     @relation("OrgMemberLinkedProfile")
-  companyLinkedProfiles      Company[]                @relation("CompanyLinkedProfile")
-  companyMemberProfiles      CompanyMember[]          @relation("CompanyMemberLinkedProfile")
-  unitLinkedProfiles         OrganizationUnit[]       @relation("UnitLinkedProfile")
-  unitMemberProfiles         OrganizationUnitMember[] @relation("UnitMemberLinkedProfile")
-  linkedEmployeeProfile      EmployeeProfile?         @relation("UserEmployeeProfile", fields: [linkedEmployeeProfileId], references: [id], onDelete: SetNull)
+enum EmployeeProfileStatus {
+  INCOMPLETE
+  PENDING_REVIEW
+  NEEDS_ADJUSTMENT
+  VERIFIED
+  EDIT_REQUESTED
+  LOCKED
+}
 
+enum EmployeeEmploymentStatus {
+  APPRENTICE
+  INTERN
+  PROBATION
+  OFFICIAL
+  RESIGNED
+  OTHER
+}
+
+/**
+ * Hiện diện / trạng thái làm việc hàng ngày (khác trạng thái lao động hợp đồng).
+ */
+enum EmployeeWorkPresenceStatus {
+  WORKING
+  ON_BREAK
+  ON_LEAVE
+  ABSENT
+  UNKNOWN
+}
+
+enum EmployeeProfileFieldDataType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DATE
+  PHONE
+  EMAIL
+  SELECT
+  MULTISELECT
+  BOOLEAN
+  SECTION
+}
+
+enum EmployeeProfileEditRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id                           String                       @id @default(uuid())
+  email                        String?                      @unique
+  passwordHash                 String                       @map("password_hash")
+  fullName                     String                       @map("full_name")
+  accountCode                  String                       @unique @map("account_code")
+  phone                        String?                      @unique
+  linkedEmployeeProfileId      String?                      @unique @map("linked_employee_profile_id")
+  isSuperAdmin                 Boolean                      @default(false) @map("is_super_admin")
+  isActive                     Boolean                      @default(true) @map("is_active")
+  mustChangePassword           Boolean                      @default(false) @map("must_change_password")
+  createdAt                    DateTime                     @default(now()) @map("created_at")
+  updatedAt                    DateTime                     @updatedAt @map("updated_at")
+  refreshTokens                RefreshToken[]
+  organizationLinkedProfiles   Organization[]               @relation("OrgLinkedProfile")
+  organizationMemberProfiles   OrganizationMember[]         @relation("OrgMemberLinkedProfile")
+  companyLinkedProfiles        Company[]                    @relation("CompanyLinkedProfile")
+  companyMemberProfiles        CompanyMember[]              @relation("CompanyMemberLinkedProfile")
+  unitLinkedProfiles           OrganizationUnit[]           @relation("UnitLinkedProfile")
+  unitMemberProfiles           OrganizationUnitMember[]     @relation("UnitMemberLinkedProfile")
+  linkedEmployeeProfile        EmployeeProfile?             @relation("UserEmployeeProfile", fields: [linkedEmployeeProfileId], references: [id], onDelete: SetNull)
+  employeeEditRequests         EmployeeProfileEditRequest[] @relation("EmployeeEditRequestRequester")
+  reviewedEmployeeEditRequests EmployeeProfileEditRequest[] @relation("EmployeeEditRequestReviewer")
+
+  @@index([isSuperAdmin])
   @@map("users")
 }
 
@@ -62,20 +116,6 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
-model Role {
-  id          String           @id @default(uuid())
-  code        String           @unique
-  name        String
-  description String?
-  isSystem    Boolean          @default(false) @map("is_system")
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  users       UserRole[]
-  permissions RolePermission[]
-
-  @@map("roles")
-}
-
 model Permission {
   id            String                             @id @default(uuid())
   code          String                             @unique
@@ -84,58 +124,26 @@ model Permission {
   description   String?
   createdAt     DateTime                           @default(now()) @map("created_at")
   updatedAt     DateTime                           @updatedAt @map("updated_at")
-  roles         RolePermission[]
-  groups        PermissionGroupPermission[]
   groupVersions PermissionGroupVersionPermission[]
 
   @@map("permissions")
 }
 
-model UserRole {
-  userId    String   @map("user_id")
-  roleId    String   @map("role_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@id([userId, roleId])
-  @@map("user_roles")
-}
-
-model RolePermission {
-  roleId       String     @map("role_id")
-  permissionId String     @map("permission_id")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@id([roleId, permissionId])
-  @@map("role_permissions")
-}
-
 model PermissionGroup {
-  id          String                      @id @default(uuid())
-  code        String                      @unique
+  id          String                   @id @default(uuid())
+  code        String                   @unique
   name        String
   description String?
-  isDefault   Boolean                     @default(false) @map("is_default")
-  createdAt   DateTime                    @default(now()) @map("created_at")
-  updatedAt   DateTime                    @updatedAt @map("updated_at")
-  permissions PermissionGroupPermission[]
+  isDefault   Boolean                  @default(false) @map("is_default")
+  createdById String?                  @map("created_by_id")
+  updatedById String?                  @map("updated_by_id")
+  deletedAt   DateTime?                @map("deleted_at")
+  createdAt   DateTime                 @default(now()) @map("created_at")
+  updatedAt   DateTime                 @updatedAt @map("updated_at")
   versions    PermissionGroupVersion[]
 
+  @@index([deletedAt])
   @@map("permission_groups")
-}
-
-model PermissionGroupPermission {
-  permissionGroupId String          @map("permission_group_id")
-  permissionId      String          @map("permission_id")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  permissionGroup   PermissionGroup @relation(fields: [permissionGroupId], references: [id], onDelete: Cascade)
-  permission        Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@id([permissionGroupId, permissionId])
-  @@map("permission_group_permissions")
 }
 
 model PermissionGroupVersion {
@@ -177,7 +185,7 @@ model PositionPermission {
   parentScopes             PositionPermissionParentScope[]
 
   @@unique([holderKind, holderId])
-  @@index([holderId])
+  @@index([permissionGroupVersionId])
   @@map("position_permissions")
 }
 
@@ -190,6 +198,7 @@ model PositionPermissionParentScope {
   positionPermission   PositionPermission @relation(fields: [positionPermissionId], references: [id], onDelete: Cascade)
 
   @@unique([positionPermissionId, nodeType, nodeId])
+  @@index([nodeType, nodeId])
   @@map("position_permission_parent_scopes")
 }
 
@@ -198,13 +207,18 @@ model Organization {
   name                String
   representativeName  String?              @map("representative_name")
   linkedProfileUserId String?              @map("linked_profile_user_id")
+  positionCode        String?              @unique @map("position_code")
   additionalInfo      String?              @map("additional_info")
+  createdById         String?              @map("created_by_id")
+  updatedById         String?              @map("updated_by_id")
+  deletedAt           DateTime?            @map("deleted_at")
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @updatedAt @map("updated_at")
   companies           Company[]
   members             OrganizationMember[]
   linkedProfileUser   User?                @relation("OrgLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
 
+  @@index([deletedAt])
   @@map("organizations")
 }
 
@@ -214,6 +228,7 @@ model OrganizationMember {
   position            String
   memberName          String       @map("member_name")
   linkedProfileUserId String?      @map("linked_profile_user_id")
+  positionCode        String?      @unique @map("position_code")
   phone               String?
   email               String?
   additionalInfo      String?      @map("additional_info")
@@ -223,6 +238,7 @@ model OrganizationMember {
   organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   linkedProfileUser   User?        @relation("OrgMemberLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId, sortOrder])
   @@map("organization_members")
 }
 
@@ -234,17 +250,24 @@ model Company {
   address             String?
   representativeName  String?            @map("representative_name")
   linkedProfileUserId String?            @map("linked_profile_user_id")
+  positionCode        String?            @unique @map("position_code")
   phone               String?
   email               String?
   status              EntityStatus       @default(ACTIVE)
   sortOrder           Int                @default(0) @map("sort_order")
+  createdById         String?            @map("created_by_id")
+  updatedById         String?            @map("updated_by_id")
+  deletedAt           DateTime?          @map("deleted_at")
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
   organization        Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   linkedProfileUser   User?              @relation("CompanyLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
   members             CompanyMember[]
   units               OrganizationUnit[]
+  employeeProfiles    EmployeeProfile[]  @relation("EmployeeManagingCompany")
 
+  @@index([organizationId, sortOrder])
+  @@index([deletedAt])
   @@map("companies")
 }
 
@@ -254,6 +277,7 @@ model CompanyMember {
   position            String
   memberName          String   @map("member_name")
   linkedProfileUserId String?  @map("linked_profile_user_id")
+  positionCode        String?  @unique @map("position_code")
   phone               String?
   email               String?
   additionalInfo      String?  @map("additional_info")
@@ -263,6 +287,7 @@ model CompanyMember {
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   linkedProfileUser   User?    @relation("CompanyMemberLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
 
+  @@index([companyId, sortOrder])
   @@map("company_members")
 }
 
@@ -273,17 +298,24 @@ model OrganizationUnit {
   name                String
   managerName         String?                  @map("manager_name")
   linkedProfileUserId String?                  @map("linked_profile_user_id")
+  positionCode        String?                  @unique @map("position_code")
   status              EntityStatus             @default(ACTIVE)
   additionalInfo      String?                  @map("additional_info")
   sortOrder           Int                      @default(0) @map("sort_order")
+  createdById         String?                  @map("created_by_id")
+  updatedById         String?                  @map("updated_by_id")
+  deletedAt           DateTime?                @map("deleted_at")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
   company             Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  parentUnit          OrganizationUnit?        @relation("UnitTree", fields: [parentUnitId], references: [id], onDelete: Cascade)
+  parentUnit          OrganizationUnit?        @relation("UnitTree", fields: [parentUnitId], references: [id], onDelete: Restrict)
   childUnits          OrganizationUnit[]       @relation("UnitTree")
   linkedProfileUser   User?                    @relation("UnitLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
   members             OrganizationUnitMember[]
 
+  @@index([companyId, sortOrder])
+  @@index([parentUnitId])
+  @@index([deletedAt])
   @@map("organization_units")
 }
 
@@ -293,6 +325,7 @@ model OrganizationUnitMember {
   position            String
   memberName          String           @map("member_name")
   linkedProfileUserId String?          @map("linked_profile_user_id")
+  positionCode        String?          @unique @map("position_code")
   phone               String?
   email               String?
   additionalInfo      String?          @map("additional_info")
@@ -302,47 +335,101 @@ model OrganizationUnitMember {
   unit                OrganizationUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
   linkedProfileUser   User?            @relation("UnitMemberLinkedProfile", fields: [linkedProfileUserId], references: [id], onDelete: SetNull)
 
+  @@index([unitId, sortOrder])
   @@map("organization_unit_members")
 }
 
 model EmployeeProfile {
-  id                       String                     @id @default(uuid())
-  profileCode              String                     @unique @map("profile_code")
-  fullName                 String                     @map("full_name")
-  gender                   EmployeeGender
-  birthDate                DateTime                   @map("birth_date") @db.Date
-  birthPlace               String                     @map("birth_place")
-  placeOfOrigin            String                     @map("place_of_origin")
-  permanentAddress         String                     @map("permanent_address")
-  currentAddress           String                     @map("current_address")
-  phone                    String                     @unique
-  email                    String                     @unique
-  ethnicity                String
+  id                       String                       @id @default(uuid())
+  profileCode              String                       @unique @map("profile_code")
+  fullName                 String                       @map("full_name")
+  gender                   EmployeeGender?
+  birthDate                DateTime?                    @map("birth_date") @db.Date
+  birthPlace               String?                      @map("birth_place")
+  placeOfOrigin            String?                      @map("place_of_origin")
+  permanentAddress         String?                      @map("permanent_address")
+  currentAddress           String?                      @map("current_address")
+  phone                    String
+  email                    String?
+  ethnicity                String?
   religion                 String?
-  identityNumber           String                     @unique @map("identity_number")
-  identityIssuedDate       DateTime                   @map("identity_issued_date") @db.Date
-  identityIssuedPlace      String                     @map("identity_issued_place")
-  educationLevel           String                     @map("education_level")
-  youthUnionAdmissionDate  DateTime?                  @map("youth_union_admission_date") @db.Date
-  youthUnionAdmissionPlace String?                    @map("youth_union_admission_place")
-  partyAdmissionDate       DateTime?                  @map("party_admission_date") @db.Date
-  partyAdmissionPlace      String?                    @map("party_admission_place")
-  rewardDiscipline         String?                    @map("reward_discipline")
+  identityNumber           String?                      @map("identity_number")
+  identityIssuedDate       DateTime?                    @map("identity_issued_date") @db.Date
+  identityIssuedPlace      String?                      @map("identity_issued_place")
+  educationLevel           String?                      @map("education_level")
+  youthUnionAdmissionDate  DateTime?                    @map("youth_union_admission_date") @db.Date
+  youthUnionAdmissionPlace String?                      @map("youth_union_admission_place")
+  partyAdmissionDate       DateTime?                    @map("party_admission_date") @db.Date
+  partyAdmissionPlace      String?                      @map("party_admission_place")
+  rewardDiscipline         String?                      @map("reward_discipline")
   strengths                String?
-  status                   EntityStatus               @default(ACTIVE)
-  createdAt                DateTime                   @default(now()) @map("created_at")
-  updatedAt                DateTime                   @updatedAt @map("updated_at")
-  linkedUser               User?                      @relation("UserEmployeeProfile")
+  avatarUrl                String?                      @map("avatar_url")
+  managingCompanyId        String?                      @map("managing_company_id")
+  employmentStatus         EmployeeEmploymentStatus?    @map("employment_status")
+  workPresenceStatus       EmployeeWorkPresenceStatus   @default(UNKNOWN) @map("work_presence_status")
+  status                   EmployeeProfileStatus        @default(INCOMPLETE)
+  createdById              String?                      @map("created_by_id")
+  updatedById              String?                      @map("updated_by_id")
+  deletedAt                DateTime?                    @map("deleted_at")
+  createdAt                DateTime                     @default(now()) @map("created_at")
+  updatedAt                DateTime                     @updatedAt @map("updated_at")
+  managingCompany          Company?                     @relation("EmployeeManagingCompany", fields: [managingCompanyId], references: [id], onDelete: SetNull)
+  linkedUser               User?                        @relation("UserEmployeeProfile")
   familyMembers            EmployeeFamilyMember[]
   educationHistories       EmployeeEducationHistory[]
   workHistories            EmployeeWorkHistory[]
+  editRequests             EmployeeProfileEditRequest[]
+  documents                EmployeeDocument[]
+  customFieldValues        EmployeeProfileFieldValue[]
 
   @@index([fullName])
   @@index([phone])
   @@index([email])
   @@index([identityNumber])
   @@index([status])
+  @@index([managingCompanyId])
+  @@index([deletedAt])
   @@map("employee_profiles")
+}
+
+model EmployeeDocument {
+  id                String          @id @default(uuid())
+  employeeProfileId String          @map("employee_profile_id")
+  documentType      String          @map("document_type")
+  name              String
+  originalFileName  String          @map("original_file_name")
+  mimeType          String          @map("mime_type")
+  size              Int
+  fileUrl           String          @map("file_url")
+  createdById       String?         @map("created_by_id")
+  deletedAt         DateTime?       @map("deleted_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  profile           EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+
+  @@index([employeeProfileId, createdAt])
+  @@index([deletedAt])
+  @@map("employee_documents")
+}
+
+model EmployeeProfileEditRequest {
+  id                String                           @id @default(uuid())
+  employeeProfileId String                           @map("employee_profile_id")
+  requestedByUserId String                           @map("requested_by_user_id")
+  reviewedByUserId  String?                          @map("reviewed_by_user_id")
+  status            EmployeeProfileEditRequestStatus @default(PENDING)
+  reason            String?
+  reviewNote        String?                          @map("review_note")
+  reviewedAt        DateTime?                        @map("reviewed_at")
+  createdAt         DateTime                         @default(now()) @map("created_at")
+  updatedAt         DateTime                         @updatedAt @map("updated_at")
+  employeeProfile   EmployeeProfile                  @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+  requestedBy       User                             @relation("EmployeeEditRequestRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy        User?                            @relation("EmployeeEditRequestReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([employeeProfileId, status, createdAt])
+  @@index([requestedByUserId, createdAt])
+  @@index([status, createdAt])
+  @@map("employee_profile_edit_requests")
 }
 
 model EmployeeFamilyMember {
@@ -390,4 +477,67 @@ model EmployeeWorkHistory {
 
   @@index([employeeProfileId])
   @@map("employee_work_histories")
+}
+
+model EmployeeProfileTab {
+  id        String                    @id @default(uuid())
+  code      String                    @unique
+  name      String
+  sortOrder Int                       @default(0) @map("sort_order")
+  isSystem  Boolean                   @default(false) @map("is_system")
+  visible   Boolean                   @default(true)
+  createdAt DateTime                  @default(now()) @map("created_at")
+  updatedAt DateTime                  @updatedAt @map("updated_at")
+  fields    EmployeeProfileTabField[]
+
+  @@map("employee_profile_tabs")
+}
+
+model EmployeeProfileFieldDef {
+  id         String                       @id @default(uuid())
+  code       String                       @unique
+  label      String
+  dataType   EmployeeProfileFieldDataType @map("data_type")
+  /// Với SECTION: family | education | work. Với SELECT: danh sách lựa chọn...
+  options    Json?
+  required   Boolean                      @default(false)
+  visible    Boolean                      @default(true)
+  isSystem   Boolean                      @default(false) @map("is_system")
+  locked     Boolean                      @default(false)
+  /// Cột EmployeeProfile nếu là built-in; null = custom JSON value
+  storageKey String?                      @map("storage_key")
+  sortOrder  Int                          @default(0) @map("sort_order")
+  createdAt  DateTime                     @default(now()) @map("created_at")
+  updatedAt  DateTime                     @updatedAt @map("updated_at")
+  tabLinks   EmployeeProfileTabField[]
+  values     EmployeeProfileFieldValue[]
+
+  @@map("employee_profile_field_defs")
+}
+
+model EmployeeProfileTabField {
+  id         String                  @id @default(uuid())
+  tabId      String                  @map("tab_id")
+  fieldDefId String                  @map("field_def_id")
+  sortOrder  Int                     @default(0) @map("sort_order")
+  tab        EmployeeProfileTab      @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  fieldDef   EmployeeProfileFieldDef @relation(fields: [fieldDefId], references: [id], onDelete: Cascade)
+
+  @@unique([tabId, fieldDefId])
+  @@index([tabId, sortOrder])
+  @@map("employee_profile_tab_fields")
+}
+
+model EmployeeProfileFieldValue {
+  id         String                  @id @default(uuid())
+  profileId  String                  @map("profile_id")
+  fieldDefId String                  @map("field_def_id")
+  value      Json
+  updatedAt  DateTime                @updatedAt @map("updated_at")
+  profile    EmployeeProfile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  fieldDef   EmployeeProfileFieldDef @relation(fields: [fieldDefId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, fieldDefId])
+  @@index([profileId])
+  @@map("employee_profile_field_values")
 }

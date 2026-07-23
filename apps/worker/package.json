@@ -9,6 +9,7 @@
     "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
+    "@erp/employee-io": "workspace:^",
     "@erp/organization-io": "workspace:^",
     "@erp/shared": "workspace:*",
     "@prisma/adapter-pg": "^7.0.0",

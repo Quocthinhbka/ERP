@@ -1,7 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PositionHolderKind } from '@erp/shared';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { UpdateOrganizationDto } from './dto/organization.dto';
+import {
+  OrganizationMemberDto,
+  UpdateOrganizationDto,
+} from './dto/organization.dto';
+import { allocatePositionCode } from './position-code.util';
 import { PositionPermissionsService } from './position-permissions.service';
 
 @Injectable()
@@ -17,7 +22,14 @@ export class OrganizationService {
       PositionHolderKind.ORGANIZATION_REP,
       org.id,
     );
-    return this.toResponse(org, positionPermission);
+    const memberPermissions =
+      await this.positionPermissions.getManyPositionPermissions(
+        org.members.map((m) => ({
+          holderKind: PositionHolderKind.ORGANIZATION_MEMBER,
+          holderId: m.id,
+        })),
+      );
+    return this.toResponse(org, positionPermission, memberPermissions);
   }
 
   async update(dto: UpdateOrganizationDto) {
@@ -28,6 +40,8 @@ export class OrganizationService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      const positionCode =
+        org.positionCode ?? (await allocatePositionCode(tx));
       await tx.organization.update({
         where: { id: org.id },
         data: {
@@ -35,32 +49,12 @@ export class OrganizationService {
           representativeName: dto.representativeName,
           linkedProfileUserId: dto.linkedProfileUserId ?? undefined,
           additionalInfo: dto.additionalInfo,
+          positionCode,
         },
       });
 
       if (dto.members) {
-        for (const member of dto.members) {
-          if (member.linkedProfileUserId) {
-            await this.ensureUser(member.linkedProfileUserId);
-          }
-        }
-        await tx.organizationMember.deleteMany({ where: { organizationId: org.id } });
-        if (dto.members.length > 0) {
-          for (const [index, m] of dto.members.entries()) {
-            await tx.organizationMember.create({
-              data: {
-                organizationId: org.id,
-                position: m.position,
-                memberName: m.memberName,
-                linkedProfileUserId: m.linkedProfileUserId,
-                phone: m.phone,
-                email: m.email,
-                additionalInfo: m.additionalInfo,
-                sortOrder: index,
-              },
-            });
-          }
-        }
+        await this.syncMembers(tx, org.id, dto.members);
       }
 
       if (dto.positionPermission !== undefined) {
@@ -76,6 +70,78 @@ export class OrganizationService {
     return this.getCurrent();
   }
 
+  private async syncMembers(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    members: OrganizationMemberDto[],
+  ) {
+    const existing = await tx.organizationMember.findMany({
+      where: { organizationId },
+      select: { id: true, positionCode: true },
+    });
+    const keepIds = new Set(members.map((m) => m.id).filter(Boolean) as string[]);
+    const toDelete = existing.filter((m) => !keepIds.has(m.id));
+
+    if (toDelete.length > 0) {
+      await this.positionPermissions.deleteByHolders(
+        toDelete.map((m) => ({
+          holderKind: PositionHolderKind.ORGANIZATION_MEMBER,
+          holderId: m.id,
+        })),
+        tx,
+      );
+      await tx.organizationMember.deleteMany({
+        where: { id: { in: toDelete.map((m) => m.id) } },
+      });
+    }
+
+    for (const [index, member] of members.entries()) {
+      if (member.linkedProfileUserId) {
+        await this.ensureUser(member.linkedProfileUserId);
+      }
+
+      let memberId = member.id;
+      if (memberId && keepIds.has(memberId)) {
+        await tx.organizationMember.update({
+          where: { id: memberId },
+          data: {
+            position: member.position,
+            memberName: member.memberName,
+            linkedProfileUserId: member.linkedProfileUserId,
+            phone: member.phone,
+            email: member.email,
+            additionalInfo: member.additionalInfo,
+            sortOrder: index,
+          },
+        });
+      } else {
+        const created = await tx.organizationMember.create({
+          data: {
+            organizationId,
+            position: member.position,
+            memberName: member.memberName,
+            linkedProfileUserId: member.linkedProfileUserId,
+            phone: member.phone,
+            email: member.email,
+            additionalInfo: member.additionalInfo,
+            sortOrder: index,
+            positionCode: await allocatePositionCode(tx),
+          },
+        });
+        memberId = created.id;
+      }
+
+      if (member.positionPermission !== undefined && memberId) {
+        await this.positionPermissions.upsertPositionPermission(
+          PositionHolderKind.ORGANIZATION_MEMBER,
+          memberId,
+          member.positionPermission,
+          tx,
+        );
+      }
+    }
+  }
+
   /** Singleton tổ chức — tạo rỗng nếu chưa có (thay seed). */
   private async ensureOrganization() {
     const existing = await this.prisma.organization.findFirst({
@@ -88,18 +154,44 @@ export class OrganizationService {
         _count: { select: { companies: true } },
       },
     });
-    if (existing) return existing;
+    if (existing) {
+      if (!existing.positionCode) {
+        const code = await this.prisma.$transaction((tx) =>
+          allocatePositionCode(tx),
+        );
+        return this.prisma.organization.update({
+          where: { id: existing.id },
+          data: { positionCode: code },
+          include: {
+            linkedProfileUser: { select: { id: true, fullName: true } },
+            members: {
+              orderBy: { sortOrder: 'asc' },
+              include: {
+                linkedProfileUser: { select: { id: true, fullName: true } },
+              },
+            },
+            _count: { select: { companies: true } },
+          },
+        });
+      }
+      return existing;
+    }
 
-    return this.prisma.organization.create({
-      data: { name: 'Tổ chức' },
-      include: {
-        linkedProfileUser: { select: { id: true, fullName: true } },
-        members: {
-          orderBy: { sortOrder: 'asc' },
-          include: { linkedProfileUser: { select: { id: true, fullName: true } } },
+    return this.prisma.$transaction(async (tx) => {
+      const code = await allocatePositionCode(tx);
+      return tx.organization.create({
+        data: { name: 'Tổ chức', positionCode: code },
+        include: {
+          linkedProfileUser: { select: { id: true, fullName: true } },
+          members: {
+            orderBy: { sortOrder: 'asc' },
+            include: {
+              linkedProfileUser: { select: { id: true, fullName: true } },
+            },
+          },
+          _count: { select: { companies: true } },
         },
-        _count: { select: { companies: true } },
-      },
+      });
     });
   }
 
@@ -116,6 +208,7 @@ export class OrganizationService {
       name: string;
       representativeName: string | null;
       linkedProfileUserId: string | null;
+      positionCode: string | null;
       additionalInfo: string | null;
       linkedProfileUser: { id: string; fullName: string } | null;
       members: Array<{
@@ -123,6 +216,7 @@ export class OrganizationService {
         position: string;
         memberName: string;
         linkedProfileUserId: string | null;
+        positionCode: string | null;
         phone: string | null;
         email: string | null;
         additionalInfo: string | null;
@@ -133,6 +227,12 @@ export class OrganizationService {
     positionPermission: Awaited<
       ReturnType<PositionPermissionsService['getPositionPermission']>
     >,
+    memberPermissions: Map<
+      string,
+      NonNullable<
+        Awaited<ReturnType<PositionPermissionsService['getPositionPermission']>>
+      >
+    >,
   ) {
     return {
       id: org.id,
@@ -140,6 +240,7 @@ export class OrganizationService {
       representativeName: org.representativeName,
       linkedProfileUserId: org.linkedProfileUserId,
       linkedProfileName: org.linkedProfileUser?.fullName ?? null,
+      positionCode: org.positionCode,
       additionalInfo: org.additionalInfo,
       positionPermission,
       members: org.members.map((m) => ({
@@ -148,9 +249,14 @@ export class OrganizationService {
         memberName: m.memberName,
         linkedProfileUserId: m.linkedProfileUserId,
         linkedProfileName: m.linkedProfileUser?.fullName ?? null,
+        positionCode: m.positionCode,
         phone: m.phone,
         email: m.email,
         additionalInfo: m.additionalInfo,
+        positionPermission:
+          memberPermissions.get(
+            `${PositionHolderKind.ORGANIZATION_MEMBER}:${m.id}`,
+          ) ?? null,
       })),
       companyCount: org._count.companies,
     };

@@ -9,7 +9,7 @@ import { createReadStream, existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { basename, join, resolve, sep } from 'path';
 import { QueueService } from '../queue/queue.service';
-import type { ApplySelection } from '@erp/organization-io';
+import type { ApplySelection, OrganizationIoFormat } from '@erp/organization-io';
 
 @Injectable()
 export class OrganizationIoService {
@@ -52,16 +52,17 @@ export class OrganizationIoService {
     return resolved;
   }
 
-  async enqueueExport() {
-    return this.queueService.enqueueOrganizationExport();
+  async enqueueExport(format: OrganizationIoFormat = 'excel') {
+    return this.queueService.enqueueOrganizationExport(format);
   }
 
   async enqueueDiff(file: Express.Multer.File) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('File Excel không hợp lệ');
+      throw new BadRequestException('File import không hợp lệ');
     }
-    if (!file.originalname.toLowerCase().endsWith('.xlsx')) {
-      throw new BadRequestException('Chỉ hỗ trợ file .xlsx');
+    const lower = file.originalname.toLowerCase();
+    if (!lower.endsWith('.xlsx') && !lower.endsWith('.json')) {
+      throw new BadRequestException('Chỉ hỗ trợ file .xlsx hoặc .json');
     }
     if (file.size > this.maxUploadBytes()) {
       throw new BadRequestException('File vượt quá kích thước cho phép');
@@ -107,10 +108,16 @@ export class OrganizationIoService {
       throw new BadRequestException('File export chưa sẵn sàng');
     }
     const filePath = this.resolveStoragePath(String(job.result.filePath));
+    const fileName =
+      job.result.fileName ?? `organization-export-${jobId}.xlsx`;
+    const contentType = String(fileName).toLowerCase().endsWith('.json')
+      ? 'application/json; charset=utf-8'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     const stream = createReadStream(filePath);
     return {
       file: new StreamableFile(stream),
-      fileName: job.result.fileName ?? `organization-export-${jobId}.xlsx`,
+      fileName,
+      contentType,
     };
   }
 

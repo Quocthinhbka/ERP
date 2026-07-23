@@ -27,5 +27,13 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
+    # Ảnh đại diện hồ sơ (thư mục uploads/ ở gốc repo — không bị ghi đè khi deploy web).
+    location /uploads/ {
+        alias /var/www/erp-uploads/;
+        access_log off;
+        expires 7d;
+        add_header Cache-Control "public";
+    }
+
     client_max_body_size 10m;
 }

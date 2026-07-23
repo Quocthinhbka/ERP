@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Card, Collapse, Table, Tag } from 'antd';
+import { useEffect } from 'react';
+import { Card, Collapse, Table, message } from 'antd';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { getApiErrorMessage } from '../../lib/errors';
+import { queryKeys } from '../../lib/queryKeys';
 
 interface PermissionItem {
   id: string;
@@ -10,30 +13,28 @@ interface PermissionItem {
   description: string | null;
 }
 
+async function fetchPermissions() {
+  const { data } = await api.get<{ grouped: Record<string, PermissionItem[]> }>('/permissions');
+  return data.grouped;
+}
+
 export function PermissionsPage() {
-  const [grouped, setGrouped] = useState<Record<string, PermissionItem[]>>({});
-  const [loading, setLoading] = useState(false);
+  const { data: grouped = {}, isLoading: loading, isError, error } = useQuery({
+    queryKey: queryKeys.permissionsGrouped,
+    queryFn: fetchPermissions,
+  });
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const { data } = await api.get<{ grouped: Record<string, PermissionItem[]> }>(
-          '/permissions',
-        );
-        setGrouped(data.grouped);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, []);
+    if (isError) {
+      message.error(getApiErrorMessage(error, 'Không tải được danh sách quyền'));
+    }
+  }, [isError, error]);
 
   const items = Object.entries(grouped).map(([module, permissions]) => ({
     key: module,
     label: (
       <span>
-        Module: <Tag color="blue">{module}</Tag> ({permissions.length} quyền)
+        Module: <strong>{module}</strong> ({permissions.length} quyền)
       </span>
     ),
     children: (
@@ -51,7 +52,7 @@ export function PermissionsPage() {
   }));
 
   return (
-    <Card title="Danh sách quyền hạn" loading={loading}>
+    <Card title="Danh sách quyền hạn" loading={loading} data-testid="permissions-page">
       <Collapse items={items} />
     </Card>
   );

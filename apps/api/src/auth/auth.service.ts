@@ -13,7 +13,6 @@ import {
   formatAccountCode,
   JwtPayload,
   parseAccountCodeSequence,
-  SystemRole,
 } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -159,6 +158,8 @@ export class AuthService {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
+      accountCode: user.accountCode,
+      linkedEmployeeProfileId: user.linkedEmployeeProfileId,
       mustChangePassword: user.mustChangePassword,
       permissions: auth.permissions,
       isSystemAdmin: auth.isSystemAdmin,
@@ -176,14 +177,22 @@ export class AuthService {
       throw new UnauthorizedException('User not found or inactive');
     }
 
-    const currentPasswordValid = await bcrypt.compare(
-      dto.currentPassword,
-      user.passwordHash,
-    );
-    if (!currentPasswordValid) {
-      throw new BadRequestException('Mật khẩu hiện tại không đúng');
+    // Lần đầu bắt buộc đổi mật khẩu: không yêu cầu mật khẩu hiện tại.
+    if (!user.mustChangePassword) {
+      if (!dto.currentPassword) {
+        throw new BadRequestException('Vui lòng nhập mật khẩu hiện tại');
+      }
+      const currentPasswordValid = await bcrypt.compare(
+        dto.currentPassword,
+        user.passwordHash,
+      );
+      if (!currentPasswordValid) {
+        throw new BadRequestException('Mật khẩu hiện tại không đúng');
+      }
     }
-    if (dto.currentPassword === dto.newPassword) {
+
+    const sameAsCurrent = await bcrypt.compare(dto.newPassword, user.passwordHash);
+    if (sameAsCurrent) {
       throw new BadRequestException('Mật khẩu mới phải khác mật khẩu hiện tại');
     }
 
@@ -219,17 +228,10 @@ export class AuthService {
       await this.ensurePhoneAvailable(dto.phone);
     }
 
-    const superAdminRole = await this.prisma.role.findUnique({
-      where: { code: SystemRole.SUPER_ADMIN },
-    });
-    if (!superAdminRole) {
-      throw new ConflictException('System roles are not initialized yet');
-    }
-
     const passwordHash = await this.hashPassword(dto.password);
     const accountCode = await this.allocateNextAccountCode();
 
-    const user = await this.prisma.user.create({
+    await this.prisma.user.create({
       data: {
         email,
         fullName: dto.fullName,
@@ -237,7 +239,7 @@ export class AuthService {
         passwordHash,
         accountCode,
         isActive: true,
-        roles: { create: [{ roleId: superAdminRole.id }] },
+        isSuperAdmin: true,
       },
     });
 
@@ -292,8 +294,10 @@ export class AuthService {
           where: { phone: this.normalizePhone(identifier) },
         });
       case 'accountCode':
-        return this.prisma.user.findUnique({
-          where: { accountCode: identifier.toUpperCase() },
+        return this.prisma.user.findFirst({
+          where: {
+            accountCode: { equals: identifier, mode: 'insensitive' },
+          },
         });
     }
   }
@@ -319,6 +323,8 @@ export class AuthService {
     id: string;
     email: string | null;
     fullName: string;
+    accountCode: string;
+    linkedEmployeeProfileId: string | null;
     mustChangePassword: boolean;
   }) {
     const auth = await this.positionPermissions.resolveAuthContext(user.id);
@@ -329,6 +335,8 @@ export class AuthService {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
+        accountCode: user.accountCode,
+        linkedEmployeeProfileId: user.linkedEmployeeProfileId,
         mustChangePassword: user.mustChangePassword,
         permissions: auth.permissions,
         isSystemAdmin: auth.isSystemAdmin,

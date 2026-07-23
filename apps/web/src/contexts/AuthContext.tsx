@@ -14,6 +14,8 @@ interface AuthUser {
   id: string;
   email: string | null;
   fullName?: string;
+  accountCode?: string;
+  linkedEmployeeProfileId?: string | null;
   mustChangePassword: boolean;
   permissions: PermissionCode[];
   isSystemAdmin?: boolean;
@@ -30,7 +32,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (credentials: LoginCredentials) => Promise<AuthUser>;
   changePassword: (values: {
-    currentPassword: string;
+    currentPassword?: string;
     newPassword: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
@@ -70,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const changePassword = useCallback(
-    async (values: { currentPassword: string; newPassword: string }) => {
+    async (values: { currentPassword?: string; newPassword: string }) => {
       const { data } = await api.post('/auth/change-password', values);
       if (!data?.user || !data?.accessToken) {
         throw new Error('Phản hồi đổi mật khẩu không hợp lệ');

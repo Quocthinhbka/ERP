@@ -1,61 +1,65 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin, TEST_ADMIN } from './helpers';
+import { getAdminAccessToken } from './helpers';
+import { getE2eApiBase } from './api-base';
 
 test.describe('Employee curriculum vitae', () => {
-  test('creates a personal profile via API and shows detail page', async ({
+  test('creates draft via dialog and shows edit form with guide panel', async ({
     page,
     request,
   }) => {
     const suffix = String(Date.now()).slice(-8);
     const phone = `09${suffix}`;
-    const email = `cv${suffix}@example.com`;
-    const identity = `07912345${suffix.slice(-4)}`.padStart(12, '0').slice(-12);
 
-    await loginAsAdmin(page);
+    await page.goto('/hr/employees');
+    await page.getByRole('button', { name: 'Thêm hồ sơ mới' }).click();
+    await page.getByLabel('Họ và tên').fill('nguyen van e2e');
+    await page.getByLabel('Số điện thoại').fill(phone);
+    await page.getByLabel('Công ty chủ quản').click();
+    await page
+      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+      .first()
+      .click();
+    await page.getByRole('button', { name: 'Tiếp tục' }).click();
 
-    const login = await request.post('http://localhost:3000/api/auth/login', {
-      data: {
-        identifier: TEST_ADMIN.email,
-        password: TEST_ADMIN.password,
-      },
-    });
-    expect(login.ok()).toBeTruthy();
-    const { accessToken } = await login.json();
+    await expect(page).toHaveURL(/\/hr\/employees\/.+\/edit/);
+    await expect(page.getByText('Hướng dẫn nhập liệu')).toBeVisible();
+    await expect(page.getByLabel('Họ và tên')).toHaveValue('NGUYEN VAN E2E');
+    await expect(page.getByLabel('Điện thoại')).toHaveValue(phone);
 
-    const created = await request.post('http://localhost:3000/api/employees', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      data: {
-        fullName: 'nguyen van e2e',
-        gender: 'MALE',
-        birthDate: '1998-01-01',
-        birthPlace: 'TP Ho Chi Minh',
-        placeOfOrigin: 'Hai Duong',
-        permanentAddress: 'So 1, Quan 1, TP.HCM',
-        currentAddress: 'So 2, Quan 3, TP.HCM',
-        phone,
-        email,
-        ethnicity: 'Kinh',
-        identityNumber: identity,
-        identityIssuedDate: '2020-01-15',
-        identityIssuedPlace: 'Cuc CSQLHC ve TTXH',
-        educationLevel: 'GRADE_12',
-      },
-    });
-    expect(created.ok()).toBeTruthy();
-    const profile = await created.json();
+    // Focus email -> hướng dẫn bên phải đổi theo trường.
+    await page.getByLabel('Email').click();
+    await expect(page.getByRole('heading', { name: 'Email' })).toBeVisible();
 
-    await page.goto(`/hr/employees/${profile.id}`);
-    await expect(
-      page.getByRole('heading', { name: `${profile.profileCode} · NGUYEN VAN E2E` }),
-    ).toBeVisible();
-    await expect(page.getByText(email)).toBeVisible();
-    await expect(page.getByText('I. Thông tin bản thân')).toBeVisible();
-    await expect(page.getByText('II. Quan hệ gia đình')).toBeVisible();
-    await expect(page.getByText('III. Tóm tắt quá trình đào tạo')).toBeVisible();
-    await expect(page.getByText('IV. Tóm tắt quá trình công tác')).toBeVisible();
+    await page.goto('/hr/employees');
+    await expect(page.getByRole('button', { name: 'Xuất hồ sơ' })).toBeVisible();
+    await expect(page.getByText(phone)).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Công ty chủ quản' })).toBeVisible();
 
-    await page.goto('/hr/employees/new');
-    await expect(page.getByText('Khai báo sơ yếu lý lịch')).toBeVisible();
-    await expect(page.getByText('I. Thông tin bản thân')).toBeVisible();
+    // Trùng SĐT → đi vào chi tiết hồ sơ đã có.
+    await page.getByRole('button', { name: 'Thêm hồ sơ mới' }).click();
+    await page.getByLabel('Họ và tên').fill('khac ten');
+    await page.getByLabel('Số điện thoại').fill(phone);
+    await page.getByLabel('Công ty chủ quản').click();
+    await page
+      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+      .first()
+      .click();
+    await page.getByRole('button', { name: 'Tiếp tục' }).click();
+    await expect(page).toHaveURL(/\/hr\/employees\/[^/]+$/);
+    await expect(page.getByRole('tab', { name: 'Thông tin cá nhân' })).toBeVisible();
+
+    // Cleanup via API
+    const accessToken = await getAdminAccessToken(request);
+    const list = await request.get(
+      `${getE2eApiBase()}/employees?search=${phone}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const body = await list.json();
+    const id = body.items?.[0]?.id;
+    if (id) {
+      await request.delete(`${getE2eApiBase()}/employees/${id}/hard`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
   });
 });

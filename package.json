@@ -12,7 +12,10 @@
     "test": "pnpm -r test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "dev:up": "bash scripts/dev-start.sh",
+    "dev:down": "bash scripts/dev-stop.sh",
+    "dev:status": "bash scripts/dev-status.sh"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

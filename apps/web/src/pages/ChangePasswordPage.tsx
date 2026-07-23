@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ChangePasswordValues {
-  currentPassword: string;
   newPassword: string;
   confirmPassword: string;
 }
@@ -29,10 +28,7 @@ export function ChangePasswordPage() {
   const onFinish = async (values: ChangePasswordValues) => {
     setSubmitting(true);
     try {
-      await changePassword({
-        currentPassword: values.currentPassword,
-        newPassword: values.newPassword,
-      });
+      await changePassword({ newPassword: values.newPassword });
       message.success('Đổi mật khẩu thành công');
       navigate('/', { replace: true });
     } catch (error: unknown) {
@@ -44,7 +40,9 @@ export function ChangePasswordPage() {
       message.error(
         typeof serverMessage === 'string'
           ? serverMessage
-          : 'Không thể đổi mật khẩu',
+          : Array.isArray(serverMessage)
+            ? serverMessage.join(', ')
+            : 'Không thể đổi mật khẩu',
       );
     } finally {
       setSubmitting(false);
@@ -63,20 +61,14 @@ export function ChangePasswordPage() {
     >
       <Card title="Đổi mật khẩu lần đầu" style={{ width: 440 }}>
         <Typography.Paragraph type="secondary">
-          Bạn phải đặt mật khẩu mới trước khi sử dụng hệ thống.
+          Bạn phải đặt mật khẩu mới trước khi sử dụng hệ thống. Không cần nhập
+          mật khẩu mặc định hiện tại.
         </Typography.Paragraph>
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item
-            name="currentPassword"
-            label="Mật khẩu hiện tại"
-            rules={[{ required: true }, { min: 8 }]}
-          >
-            <Input.Password autoComplete="current-password" />
-          </Form.Item>
-          <Form.Item
             name="newPassword"
             label="Mật khẩu mới"
-            rules={[{ required: true }, { min: 8 }]}
+            rules={[{ required: true, message: 'Nhập mật khẩu mới' }, { min: 8 }]}
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
@@ -85,7 +77,7 @@ export function ChangePasswordPage() {
             label="Xác nhận mật khẩu mới"
             dependencies={['newPassword']}
             rules={[
-              { required: true },
+              { required: true, message: 'Xác nhận mật khẩu mới' },
               ({ getFieldValue }) => ({
                 validator(_, value) {
                   return !value || getFieldValue('newPassword') === value

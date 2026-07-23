@@ -1,9 +1,9 @@
 import {
-  IsArray,
   IsBoolean,
   IsEmail,
   IsOptional,
   IsString,
+  IsUUID,
   MinLength,
 } from 'class-validator';
 
@@ -29,8 +29,8 @@ export class UpdateUserDto {
   @IsBoolean()
   isActive?: boolean;
 
+  /** Gắn hồ sơ nhân viên (chỉ khi tài khoản chưa có liên kết) */
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  roleIds?: string[];
+  @IsUUID()
+  employeeProfileId?: string;
 }

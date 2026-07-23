@@ -1,13 +1,14 @@
 import type {
   EducationLevel,
   EmployeeGender,
-  EntityStatus,
+  EmployeeProfileStatus,
+  EmployeeProfileEditRequestStatus,
   FamilyRelationship,
   Religion,
   TrainingMode,
 } from '@erp/shared';
 
-export type EmployeeStatus = EntityStatus;
+export type EmployeeStatus = EmployeeProfileStatus;
 
 export interface LinkedUserSummary {
   id: string;
@@ -16,17 +17,32 @@ export interface LinkedUserSummary {
   fullName: string;
 }
 
+export interface EmployeeProfileEditRequest {
+  id: string;
+  status: EmployeeProfileEditRequestStatus;
+  reason: string | null;
+  reviewNote?: string | null;
+  createdAt: string;
+  reviewedAt?: string | null;
+}
+
 export interface EmployeeListItem {
   id: string;
   profileCode: string;
   fullName: string;
   phone: string;
-  email: string;
-  gender: EmployeeGender;
-  birthDate: string;
+  email: string | null;
+  gender: EmployeeGender | null;
+  birthDate: string | null;
+  avatarUrl?: string | null;
   status: EmployeeStatus;
   createdAt: string;
+  managingCompanyId?: string | null;
+  managingCompany?: { id: string; name: string } | null;
+  employmentStatus?: string | null;
+  workPresenceStatus?: string | null;
   linkedUser: LinkedUserSummary | null;
+  editRequests?: EmployeeProfileEditRequest[];
 }
 
 export interface EmployeeFamilyMember {
@@ -65,33 +81,46 @@ export interface EmployeeProfileDetail {
   id: string;
   profileCode: string;
   fullName: string;
-  gender: EmployeeGender;
-  birthDate: string;
-  birthPlace: string;
-  placeOfOrigin: string;
-  permanentAddress: string;
-  currentAddress: string;
+  gender: EmployeeGender | null;
+  birthDate: string | null;
+  birthPlace: string | null;
+  placeOfOrigin: string | null;
+  permanentAddress: string | null;
+  currentAddress: string | null;
   phone: string;
-  email: string;
-  ethnicity: string;
+  email: string | null;
+  ethnicity: string | null;
   religion?: Religion | null;
-  identityNumber: string;
-  identityIssuedDate: string;
-  identityIssuedPlace: string;
-  educationLevel: EducationLevel;
+  identityNumber: string | null;
+  identityIssuedDate: string | null;
+  identityIssuedPlace: string | null;
+  educationLevel: EducationLevel | null;
   youthUnionAdmissionDate?: string | null;
   youthUnionAdmissionPlace?: string | null;
   partyAdmissionDate?: string | null;
   partyAdmissionPlace?: string | null;
   rewardDiscipline?: string | null;
   strengths?: string | null;
+  employmentStatus?: string | null;
+  workPresenceStatus?: string | null;
+  managingCompanyId?: string | null;
+  managingCompany?: { id: string; name: string; status?: string } | null;
+  customValues?: Record<string, unknown>;
+  avatarUrl?: string | null;
   status: EmployeeStatus;
   linkedUser?: LinkedUserSummary | null;
   familyMembers: EmployeeFamilyMember[];
   educationHistories: EmployeeEducationHistory[];
   workHistories: EmployeeWorkHistory[];
+  editRequests?: EmployeeProfileEditRequest[];
+  latestEditRequest?: EmployeeProfileEditRequest | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CheckOrCreateResult {
+  created: boolean;
+  profile: EmployeeProfileDetail;
 }
 
 export interface EmployeeCollectionPage<T> {

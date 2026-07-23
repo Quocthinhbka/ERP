@@ -1,13 +1,17 @@
-import { Card, Col, Row, Statistic, Typography } from 'antd';
+import { Card, Col, Row, Statistic, Tag, Typography } from 'antd';
 import { TeamOutlined, KeyOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
+
+function roleLabel(isSystemAdmin?: boolean) {
+  if (isSystemAdmin) return 'Quản trị hệ thống';
+  return 'Người dùng';
+}
 
 export function DashboardPage() {
   const { user } = useAuth();
 
   return (
     <div>
-      <Typography.Title level={3}>Tổng quan</Typography.Title>
       <Typography.Paragraph>
         Xin chào, <strong>{user?.fullName ?? user?.email}</strong>
       </Typography.Paragraph>
@@ -24,7 +28,16 @@ export function DashboardPage() {
         </Col>
         <Col xs={24} sm={8}>
           <Card>
-            <Statistic title="Vai trò" value="Super Admin" prefix={<TeamOutlined />} />
+            <Statistic
+              title="Vai trò"
+              value={roleLabel(user?.isSystemAdmin)}
+              prefix={<TeamOutlined />}
+            />
+            {user?.isSystemAdmin && (
+              <Tag color="gold" style={{ marginTop: 8 }}>
+                System Admin
+              </Tag>
+            )}
           </Card>
         </Col>
       </Row>

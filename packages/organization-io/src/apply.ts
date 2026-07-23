@@ -74,12 +74,26 @@ export async function applyOrganizationSelections(
     });
 
     const positionHolders: Array<{
-      holderKind: 'ORGANIZATION_REP' | 'COMPANY_REP' | 'UNIT_MANAGER' | 'UNIT_MEMBER';
+      holderKind:
+        | 'ORGANIZATION_REP'
+        | 'COMPANY_REP'
+        | 'UNIT_MANAGER'
+        | 'UNIT_MEMBER'
+        | 'ORGANIZATION_MEMBER'
+        | 'COMPANY_MEMBER';
       holderId: string;
     }> = [];
 
     for (const item of toDelete.unitMembers) {
       positionHolders.push({ holderKind: 'UNIT_MEMBER', holderId: item.entityId });
+    }
+
+    for (const item of toDelete.orgMembers) {
+      positionHolders.push({ holderKind: 'ORGANIZATION_MEMBER', holderId: item.entityId });
+    }
+
+    for (const item of toDelete.companyMembers) {
+      positionHolders.push({ holderKind: 'COMPANY_MEMBER', holderId: item.entityId });
     }
 
     for (const item of unitDeleteOrdered) {
@@ -91,6 +105,12 @@ export async function applyOrganizationSelections(
 
     for (const item of toDelete.companies) {
       positionHolders.push({ holderKind: 'COMPANY_REP', holderId: item.entityId });
+      // Thành viên công ty bị xoá theo cascade khi xoá công ty.
+      for (const member of current.companyMembers.filter(
+        (m) => m.companyId === item.entityId,
+      )) {
+        positionHolders.push({ holderKind: 'COMPANY_MEMBER', holderId: member.id });
+      }
       const companyUnits = current.units.filter((u) => u.companyId === item.entityId);
       for (const unit of companyUnits) {
         positionHolders.push({ holderKind: 'UNIT_MANAGER', holderId: unit.id });

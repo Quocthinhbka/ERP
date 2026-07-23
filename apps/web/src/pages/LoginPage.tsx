@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Card, Form, Input, Typography, message } from 'antd';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
+import { getLoginErrorMessage } from '../lib/errors';
 
 type LoginValues = { identifier: string; password: string };
 
@@ -35,29 +36,7 @@ export function LoginPage() {
         { replace: true },
       );
     } catch (error: unknown) {
-      const status =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { status?: number; data?: { message?: string | string[] } } })
-              .response?.status
-          : undefined;
-      const serverMessage =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { message?: string | string[] } } }).response?.data
-              ?.message
-          : undefined;
-      if (status === 429) {
-        message.error('Thử đăng nhập quá nhiều lần. Vui lòng đợi khoảng 1 phút rồi thử lại.');
-      } else if (status === 401) {
-        message.error('Thông tin đăng nhập hoặc mật khẩu không đúng');
-      } else if (typeof serverMessage === 'string') {
-        message.error(serverMessage);
-      } else if (Array.isArray(serverMessage) && serverMessage[0]) {
-        message.error(String(serverMessage[0]));
-      } else if (error instanceof Error && error.message) {
-        message.error(error.message);
-      } else {
-        message.error('Không kết nối được máy chủ. Kiểm tra API đang chạy và thử lại.');
-      }
+      message.error(getLoginErrorMessage(error));
     } finally {
       setLoading(false);
     }

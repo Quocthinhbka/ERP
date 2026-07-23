@@ -15,7 +15,8 @@ export class CreatePermissionGroupDto {
 
   @IsArray()
   @IsUUID(undefined, { each: true })
-  permissionIds!: string[];
+  @IsOptional()
+  permissionIds: string[] = [];
 }
 
 export class UpdatePermissionGroupDto {

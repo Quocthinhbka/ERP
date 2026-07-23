@@ -11,6 +11,7 @@ import {
   UnitMemberDto,
   UpdateOrganizationUnitDto,
 } from './dto/organization.dto';
+import { allocatePositionCode } from './position-code.util';
 import { PositionPermissionsService } from './position-permissions.service';
 
 @Injectable()
@@ -58,6 +59,7 @@ export class OrganizationUnitsService {
           status: dto.status ?? 'ACTIVE',
           additionalInfo: dto.additionalInfo,
           sortOrder: (siblingMax._max.sortOrder ?? -1) + 1,
+          positionCode: await allocatePositionCode(tx),
         },
       });
 
@@ -77,7 +79,7 @@ export class OrganizationUnitsService {
   }
 
   async update(id: string, dto: UpdateOrganizationUnitDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
     if (dto.linkedProfileUserId) {
       await this.ensureUser(dto.linkedProfileUserId);
@@ -92,6 +94,8 @@ export class OrganizationUnitsService {
           linkedProfileUserId: dto.linkedProfileUserId ?? undefined,
           status: dto.status,
           additionalInfo: dto.additionalInfo,
+          positionCode:
+            current.positionCode ?? (await allocatePositionCode(tx)),
         },
       });
 
@@ -263,6 +267,7 @@ export class OrganizationUnitsService {
             email: member.email,
             additionalInfo: member.additionalInfo,
             sortOrder: index,
+            positionCode: await allocatePositionCode(tx),
           },
         });
         memberId = created.id;
@@ -294,6 +299,7 @@ export class OrganizationUnitsService {
       name: string;
       managerName: string | null;
       linkedProfileUserId: string | null;
+      positionCode: string | null;
       status: string;
       additionalInfo: string | null;
       linkedProfileUser: { id: string; fullName: string } | null;
@@ -302,6 +308,7 @@ export class OrganizationUnitsService {
         position: string;
         memberName: string;
         linkedProfileUserId: string | null;
+        positionCode: string | null;
         phone: string | null;
         email: string | null;
         additionalInfo: string | null;
@@ -324,6 +331,7 @@ export class OrganizationUnitsService {
       managerName: unit.managerName,
       linkedProfileUserId: unit.linkedProfileUserId,
       linkedProfileName: unit.linkedProfileUser?.fullName ?? null,
+      positionCode: unit.positionCode,
       status: unit.status,
       additionalInfo: unit.additionalInfo,
       isLeaf,
@@ -334,6 +342,7 @@ export class OrganizationUnitsService {
         memberName: m.memberName,
         linkedProfileUserId: m.linkedProfileUserId,
         linkedProfileName: m.linkedProfileUser?.fullName ?? null,
+        positionCode: m.positionCode,
         phone: m.phone,
         email: m.email,
         additionalInfo: m.additionalInfo,

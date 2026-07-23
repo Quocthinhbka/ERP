@@ -7,12 +7,12 @@ import {
 } from './index.js';
 
 describe('hasPermission', () => {
-  const perms = [Permissions.USER_VIEW, Permissions.ROLE_VIEW];
+  const perms = [Permissions.USER_VIEW, Permissions.PERMISSION_VIEW];
 
   it('returns true when user has all required permissions', () => {
     assert.equal(hasPermission(perms, Permissions.USER_VIEW), true);
     assert.equal(
-      hasPermission(perms, [Permissions.USER_VIEW, Permissions.ROLE_VIEW]),
+      hasPermission(perms, [Permissions.USER_VIEW, Permissions.PERMISSION_VIEW]),
       true,
     );
   });
@@ -38,7 +38,10 @@ describe('hasAnyPermission', () => {
 
   it('returns false when user has none of the permissions', () => {
     assert.equal(
-      hasAnyPermission(perms, [Permissions.USER_CREATE, Permissions.ROLE_CREATE]),
+      hasAnyPermission(perms, [
+        Permissions.USER_CREATE,
+        Permissions.PERMISSION_GROUP_CREATE,
+      ]),
       false,
     );
   });

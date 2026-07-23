@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -8,6 +8,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -19,15 +20,24 @@ import {
 } from 'class-validator';
 import {
   EducationLevel,
+  EmployeeDocumentType,
+  EmployeeEmploymentStatus,
   EmployeeGender,
+  EmployeeProfileStatus,
+  EmployeeWorkPresenceStatus,
   ETHNICITIES,
-  EntityStatus,
   FamilyRelationship,
   Religion,
   TrainingMode,
 } from '@erp/shared';
 
 export const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function toEnumArray<T extends string>(value: unknown): T[] | undefined {
+  if (value == null || value === '') return undefined;
+  const items = (Array.isArray(value) ? value : [value]).map(String).filter(Boolean);
+  return items.length > 0 ? (items as T[]) : undefined;
+}
 
 export class EmployeeFamilyMemberDto {
   @IsEnum(FamilyRelationship)
@@ -113,12 +123,6 @@ export class EmployeeWorkHistoryDto {
 
 export class EmployeeBaseDto {
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(200)
-  fullName?: string;
-
-  @IsOptional()
   @IsEnum(EmployeeGender)
   gender?: EmployeeGender;
 
@@ -149,10 +153,6 @@ export class EmployeeBaseDto {
   @IsNotEmpty()
   @MaxLength(2000)
   currentAddress?: string;
-
-  @IsOptional()
-  @Matches(/^\d{10,11}$/)
-  phone?: string;
 
   @IsOptional()
   @IsEmail()
@@ -214,112 +214,82 @@ export class EmployeeBaseDto {
   strengths?: string;
 
   @IsOptional()
-  @IsEnum(EntityStatus)
-  status?: EntityStatus;
+  @IsEnum(EmployeeEmploymentStatus)
+  employmentStatus?: EmployeeEmploymentStatus | null;
+
+  @IsOptional()
+  @IsEnum(EmployeeWorkPresenceStatus)
+  workPresenceStatus?: EmployeeWorkPresenceStatus;
+
+  /** Giá trị trường custom: key = field code. */
+  @IsOptional()
+  @IsObject()
+  customValues?: Record<string, unknown>;
 
   @IsOptional()
   @IsUUID()
   linkedUserId?: string | null;
 }
 
-export class CreateEmployeeDto {
+/** Tạo nhanh / đầy đủ: bắt buộc họ tên + SĐT + công ty chủ quản. */
+export class CreateEmployeeDto extends EmployeeBaseDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
   fullName!: string;
 
-  @IsEnum(EmployeeGender)
-  gender!: EmployeeGender;
+  @Matches(/^\d{10,11}$/)
+  phone!: string;
 
-  @IsDateString()
-  birthDate!: string;
+  @IsUUID()
+  managingCompanyId!: string;
+}
 
+/** Dialog thêm hồ sơ: họ tên + SĐT + công ty chủ quản. */
+export class CheckOrCreateEmployeeDto {
   @IsString()
   @IsNotEmpty()
-  @MaxLength(255)
-  birthPlace!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(255)
-  placeOfOrigin!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(2000)
-  permanentAddress!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(2000)
-  currentAddress!: string;
+  @MaxLength(200)
+  fullName!: string;
 
   @Matches(/^\d{10,11}$/)
   phone!: string;
 
-  @IsEmail()
-  @MaxLength(255)
-  email!: string;
+  @IsUUID()
+  managingCompanyId!: string;
+}
 
-  @IsIn(ETHNICITIES)
-  ethnicity!: string;
+export class UpdateEmployeeDto extends EmployeeBaseDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  fullName?: string;
 
   @IsOptional()
-  @IsEnum(Religion)
-  religion?: Religion;
+  @Matches(/^\d{10,11}$/)
+  phone?: string;
 
-  @Matches(/^\d{12}$/)
-  identityNumber!: string;
+  @IsOptional()
+  @IsUUID()
+  @IsNotEmpty()
+  managingCompanyId?: string;
+}
 
-  @IsDateString()
-  identityIssuedDate!: string;
+export class UpdateEmployeeStatusDto {
+  @IsEnum(EmployeeProfileStatus)
+  status!: EmployeeProfileStatus;
+}
+
+export class UploadEmployeeDocumentDto {
+  @IsEnum(EmployeeDocumentType)
+  documentType!: EmployeeDocumentType;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  identityIssuedPlace!: string;
-
-  @IsEnum(EducationLevel)
-  educationLevel!: EducationLevel;
-
-  @IsOptional()
-  @IsDateString()
-  youthUnionAdmissionDate?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  youthUnionAdmissionPlace?: string;
-
-  @IsOptional()
-  @IsDateString()
-  partyAdmissionDate?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  partyAdmissionPlace?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(4000)
-  rewardDiscipline?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(4000)
-  strengths?: string;
-
-  @IsOptional()
-  @IsEnum(EntityStatus)
-  status?: EntityStatus;
-
-  @IsOptional()
-  @IsUUID()
-  linkedUserId?: string | null;
+  name!: string;
 }
-
-export class UpdateEmployeeDto extends EmployeeBaseDto {}
 
 export class EmployeeCollectionQueryDto {
   @IsOptional()
@@ -343,8 +313,33 @@ export class EmployeeCollectionQueryDto {
 
 export class EmployeeQueryDto extends EmployeeCollectionQueryDto {
   @IsOptional()
-  @IsEnum(EntityStatus)
-  status?: EntityStatus;
+  @IsEnum(EmployeeProfileStatus)
+  status?: EmployeeProfileStatus;
+
+  @IsOptional()
+  @Transform(({ value }) => toEnumArray<EmployeeProfileStatus>(value))
+  @IsArray()
+  @IsEnum(EmployeeProfileStatus, { each: true })
+  statusIn?: EmployeeProfileStatus[];
+
+  @IsOptional()
+  @Transform(({ value }) => toEnumArray<EmployeeEmploymentStatus>(value))
+  @IsArray()
+  @IsEnum(EmployeeEmploymentStatus, { each: true })
+  employmentStatusIn?: EmployeeEmploymentStatus[];
+
+  @IsOptional()
+  @Transform(({ value }) => toEnumArray<EmployeeWorkPresenceStatus>(value))
+  @IsArray()
+  @IsEnum(EmployeeWorkPresenceStatus, { each: true })
+  workPresenceStatusIn?: EmployeeWorkPresenceStatus[];
+
+  @IsOptional()
+  @Transform(({ value }) => toEnumArray<string>(value))
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('4', { each: true })
+  managingCompanyIdIn?: string[];
 }
 
 export class ReorderChildrenDto {
@@ -451,4 +446,27 @@ export class UpdateWorkHistoryDto {
   @IsNotEmpty()
   @MaxLength(300)
   position?: string;
+}
+
+export class ApplyEmployeeSelectionDto {
+  @IsString()
+  @IsNotEmpty()
+  selectionKey!: string;
+}
+
+export class ApplyEmployeeImportDto {
+  @IsString()
+  @IsNotEmpty()
+  snapshotJobId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplyEmployeeSelectionDto)
+  selections!: ApplyEmployeeSelectionDto[];
+}
+
+export class ExportEmployeeDto {
+  @IsOptional()
+  @IsIn(['excel', 'json'])
+  format?: 'excel' | 'json';
 }

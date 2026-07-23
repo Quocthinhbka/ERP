@@ -1,10 +1,16 @@
 import {
   EducationLevel,
+  EmployeeEmploymentStatus,
   EmployeeGender,
+  EmployeeProfileStatus,
+  EmployeeWorkPresenceStatus,
+  EMPLOYMENT_STATUS_LABELS,
   ETHNICITIES,
   FamilyRelationship,
+  getAllowedEmployeeStatusTransitions,
   Religion,
   TrainingMode,
+  WORK_PRESENCE_STATUS_LABELS,
 } from '@erp/shared';
 
 export const GENDER_OPTIONS = [
@@ -12,6 +18,49 @@ export const GENDER_OPTIONS = [
   { value: EmployeeGender.FEMALE, label: 'Nữ' },
   { value: EmployeeGender.OTHER, label: 'Khác' },
 ];
+
+export const PROFILE_STATUS_OPTIONS = [
+  { value: EmployeeProfileStatus.INCOMPLETE, label: 'Chưa khai báo', color: 'default' },
+  { value: EmployeeProfileStatus.PENDING_REVIEW, label: 'Chờ xác nhận', color: 'processing' },
+  { value: EmployeeProfileStatus.NEEDS_ADJUSTMENT, label: 'Cần điều chỉnh', color: 'orange' },
+  { value: EmployeeProfileStatus.VERIFIED, label: 'Đã xác nhận', color: 'green' },
+  {
+    value: EmployeeProfileStatus.EDIT_REQUESTED,
+    label: 'Yêu cầu chỉnh sửa',
+    color: 'purple',
+  },
+  { value: EmployeeProfileStatus.LOCKED, label: 'Khóa', color: 'red' },
+] as const;
+
+export const EMPLOYMENT_STATUS_FILTER_OPTIONS = (
+  Object.values(EmployeeEmploymentStatus) as EmployeeEmploymentStatus[]
+).map((value) => ({
+  value,
+  label: EMPLOYMENT_STATUS_LABELS[value],
+}));
+
+export const WORK_PRESENCE_FILTER_OPTIONS = (
+  Object.values(EmployeeWorkPresenceStatus) as EmployeeWorkPresenceStatus[]
+).map((value) => ({
+  value,
+  label: WORK_PRESENCE_STATUS_LABELS[value],
+}));
+
+export function profileStatusLabel(status: EmployeeProfileStatus | string) {
+  return PROFILE_STATUS_OPTIONS.find((item) => item.value === status)?.label ?? status;
+}
+
+export function profileStatusColor(status: EmployeeProfileStatus | string) {
+  return PROFILE_STATUS_OPTIONS.find((item) => item.value === status)?.color ?? 'default';
+}
+
+export function getNextStatusOptions(from: EmployeeProfileStatus) {
+  return getAllowedEmployeeStatusTransitions(from).map((value) => ({
+    value,
+    label: profileStatusLabel(value),
+    color: profileStatusColor(value),
+  }));
+}
 
 export const RELIGION_OPTIONS = [
   { value: Religion.NONE, label: 'Không' },

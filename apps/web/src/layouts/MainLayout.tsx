@@ -12,10 +12,18 @@ import {
   KeyOutlined,
   LogoutOutlined,
   SolutionOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { Permissions } from '@erp/shared';
 import { useAuth } from '../contexts/AuthContext';
+import { PageBreadcrumbProvider, usePageBreadcrumbState } from '../contexts/PageBreadcrumbContext';
+import { HeaderBreadcrumb } from '../components/HeaderBreadcrumb';
+import {
+  buildBreadcrumbSegments,
+  findNavTrail,
+  type NavNodeLike,
+} from '../lib/nav-breadcrumb';
 
 const { Header, Sider, Content } = Layout;
 
@@ -255,23 +263,42 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
       label: 'Tổng quan',
       path: '/',
     },
+    {
+      key: 'personal',
+      icon: <UserOutlined />,
+      label: 'Cá nhân',
+      children: [
+        {
+          key: 'nav-personal-profile',
+          icon: <IdcardOutlined />,
+          label: 'Hồ sơ cá nhân',
+          path: '/personal/profile',
+        },
+        {
+          key: 'nav-personal-account',
+          icon: <KeyOutlined />,
+          label: 'Tài khoản cá nhân',
+          path: '/personal/account',
+        },
+      ],
+    },
   ];
 
   const hrChildren: NavNode[] = [];
-  if (hasPermission(Permissions.USER_VIEW)) {
-    hrChildren.push({
-      key: 'nav-accounts',
-      icon: <TeamOutlined />,
-      label: 'Tài khoản',
-      path: '/hr/accounts',
-    });
-  }
   if (hasPermission(Permissions.HR_EMPLOYEE_VIEW) || hasPermission(Permissions.HR_VIEW)) {
     hrChildren.push({
       key: 'nav-employees',
       icon: <IdcardOutlined />,
-      label: 'Sơ yếu lý lịch',
+      label: 'Quản lý hồ sơ',
       path: '/hr/employees',
+    });
+  }
+  if (hasPermission(Permissions.USER_VIEW)) {
+    hrChildren.push({
+      key: 'nav-accounts',
+      icon: <TeamOutlined />,
+      label: 'Quản lý tài khoản',
+      path: '/hr/accounts',
     });
   }
   if (hrChildren.length > 0) {
@@ -294,15 +321,26 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
     });
   }
 
-  const permissionChildren: NavNode[] = [];
-  if (hasPermission(Permissions.ROLE_VIEW)) {
-    permissionChildren.push({
-      key: 'nav-roles',
-      icon: <KeyOutlined />,
-      label: 'Vai trò',
-      path: '/setup/roles',
+  if (
+    hasPermission(Permissions.SETUP_VIEW) ||
+    hasPermission(Permissions.SETUP_MANAGE)
+  ) {
+    setupChildren.push({
+      key: 'setup-hr',
+      icon: <IdcardOutlined />,
+      label: 'Nhân sự',
+      children: [
+        {
+          key: 'nav-profile-fields',
+          icon: <IdcardOutlined />,
+          label: 'Hồ sơ',
+          path: '/setup/hr/profile-fields',
+        },
+      ],
     });
   }
+
+  const permissionChildren: NavNode[] = [];
   if (hasPermission(Permissions.PERMISSION_GROUP_VIEW)) {
     permissionChildren.push({
       key: 'nav-permission-groups',
@@ -331,7 +369,9 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
 
   if (
     setupChildren.length > 0 &&
-    (hasPermission(Permissions.ORGANIZATION_VIEW) || hasPermission(Permissions.SETUP_VIEW))
+    (hasPermission(Permissions.ORGANIZATION_VIEW) ||
+      hasPermission(Permissions.SETUP_VIEW) ||
+      hasPermission(Permissions.SETUP_MANAGE))
   ) {
     items.push({
       key: 'setup',
@@ -342,6 +382,72 @@ function buildNavTree(hasPermission: (p: (typeof Permissions)[keyof typeof Permi
   }
 
   return items;
+}
+
+function AppHeader({
+  collapsed,
+  onToggleCollapsed,
+  userLabel,
+  onLogout,
+  navTree,
+  pathname,
+}: {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  userLabel: string;
+  onLogout: () => void;
+  navTree: NavNodeLike[];
+  pathname: string;
+}) {
+  const { token } = theme.useToken();
+  const suffix = usePageBreadcrumbState();
+  const trail = findNavTrail(navTree, pathname) ?? [];
+  const segments = buildBreadcrumbSegments(navTree, trail, suffix);
+
+  return (
+    <Header
+      style={{
+        flexShrink: 0,
+        background: token.colorBgContainer,
+        height: HEADER_HEIGHT,
+        padding: '0 12px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        borderBottom: `1px solid ${token.colorBorderSecondary}`,
+      }}
+    >
+      <Button
+        type="text"
+        aria-label={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+        icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+        onClick={onToggleCollapsed}
+      />
+      <HeaderBreadcrumb segments={segments} />
+      <div
+        style={{
+          marginLeft: 'auto',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexShrink: 0,
+          maxWidth: '40%',
+        }}
+      >
+        <Typography.Text ellipsis style={{ fontSize: 13 }}>
+          {userLabel}
+        </Typography.Text>
+        <Button
+          type="text"
+          size="small"
+          icon={<LogoutOutlined />}
+          onClick={onLogout}
+        >
+          Đăng xuất
+        </Button>
+      </div>
+    </Header>
+  );
 }
 
 export function MainLayout() {
@@ -357,6 +463,11 @@ export function MainLayout() {
   const selectedKey =
     flattenNavKeys(navTree).find((key) => key !== '/' && location.pathname.startsWith(key)) ??
     (location.pathname === '/' ? '/' : location.pathname);
+
+  const userLabel =
+    [user?.fullName, user?.accountCode].filter(Boolean).join(' - ') ||
+    user?.email ||
+    '';
 
   return (
     <Layout style={{ height: '100vh', overflow: 'hidden' }}>
@@ -418,63 +529,42 @@ export function MainLayout() {
           )}
         </div>
       </Sider>
-      <Layout
-        style={{
-          flex: 1,
-          minWidth: 0,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        <Header
-          style={{
-            flexShrink: 0,
-            background: token.colorBgContainer,
-            height: HEADER_HEIGHT,
-            lineHeight: `${HEADER_HEIGHT}px`,
-            padding: '0 12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
-          }}
-        >
-          <Button
-            type="text"
-            aria-label={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setCollapsed((value) => !value)}
-          />
-          <Typography.Text ellipsis style={{ flex: 1, margin: '0 12px', fontSize: 13 }}>
-            {user?.email}
-          </Typography.Text>
-          <Button
-            type="text"
-            size="small"
-            icon={<LogoutOutlined />}
-            onClick={() => {
-              void logout().finally(() => navigate('/login'));
-            }}
-          >
-            Đăng xuất
-          </Button>
-        </Header>
-        <Content
+      <PageBreadcrumbProvider>
+        <Layout
           style={{
             flex: 1,
+            minWidth: 0,
             minHeight: 0,
-            overflow: 'auto',
-            margin: 12,
-            padding: 12,
-            background: token.colorBgContainer,
-            borderRadius: token.borderRadiusLG,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
           }}
         >
-          <Outlet />
-        </Content>
-      </Layout>
+          <AppHeader
+            collapsed={collapsed}
+            onToggleCollapsed={() => setCollapsed((value) => !value)}
+            userLabel={userLabel}
+            onLogout={() => {
+              void logout().finally(() => navigate('/login'));
+            }}
+            navTree={navTree}
+            pathname={location.pathname}
+          />
+          <Content
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: 'auto',
+              margin: 12,
+              padding: 12,
+              background: token.colorBgContainer,
+              borderRadius: token.borderRadiusLG,
+            }}
+          >
+            <Outlet />
+          </Content>
+        </Layout>
+      </PageBreadcrumbProvider>
     </Layout>
   );
 }

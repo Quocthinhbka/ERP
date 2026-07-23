@@ -1,40 +1,20 @@
 import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import { Permissions } from '@erp/shared';
-import { createTestApp, getHttpServer, loginAsAdmin } from './test-utils';
+import { createTestApp, ensureTestManagingCompany, getHttpServer, loginAsAdmin } from './test-utils';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Setup / Permissions (e2e)', () => {
   let app: INestApplication;
   let accessToken: string;
   let prisma: PrismaService;
-  let roleId: string;
-  let permissionIds: string[];
   let createdUserId: string;
   let createdEmployeeId: string;
-  let createdRoleId: string;
 
   beforeAll(async () => {
     app = await createTestApp();
     prisma = app.get(PrismaService);
     accessToken = await loginAsAdmin(app);
-
-    const roles = await request(getHttpServer(app))
-      .get('/api/roles')
-      .set('Authorization', `Bearer ${accessToken}`);
-
-    roleId = roles.body.find((r: { code: string }) => r.code === 'user').id;
-
-    const permissions = await request(getHttpServer(app))
-      .get('/api/permissions')
-      .set('Authorization', `Bearer ${accessToken}`);
-
-    permissionIds = permissions.body.items
-      .filter(
-        (p: { code: string }) =>
-          p.code === Permissions.SETUP_VIEW || p.code === Permissions.USER_VIEW,
-      )
-      .map((p: { id: string }) => p.id);
   });
 
   afterAll(async () => {
@@ -48,22 +28,14 @@ describe('Setup / Permissions (e2e)', () => {
         where: { id: createdEmployeeId },
       });
     }
-    if (createdRoleId) {
-      await request(getHttpServer(app))
-        .delete(`/api/roles/${createdRoleId}`)
-        .set('Authorization', `Bearer ${accessToken}`);
-    }
     await app.close();
   });
 
-  it('GET /api/roles returns roles list', async () => {
-    const res = await request(getHttpServer(app))
+  it('GET /api/roles is removed', async () => {
+    await request(getHttpServer(app))
       .get('/api/roles')
       .set('Authorization', `Bearer ${accessToken}`)
-      .expect(200);
-
-    expect(res.body.length).toBeGreaterThanOrEqual(3);
-    expect(res.body.some((r: { code: string }) => r.code === 'super_admin')).toBe(true);
+      .expect(404);
   });
 
   it('GET /api/permissions returns grouped permissions', async () => {
@@ -74,23 +46,12 @@ describe('Setup / Permissions (e2e)', () => {
 
     expect(res.body.items.length).toBeGreaterThan(0);
     expect(res.body.grouped).toBeDefined();
-  });
-
-  it('POST /api/roles creates custom role', async () => {
-    const res = await request(getHttpServer(app))
-      .post('/api/roles')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({
-        code: `test_role_${Date.now()}`,
-        name: 'Test Role',
-        description: 'E2E test role',
-        permissionIds,
-      })
-      .expect(201);
-
-    expect(res.body.id).toBeDefined();
-    expect(res.body.permissions.length).toBe(permissionIds.length);
-    createdRoleId = res.body.id;
+    expect(
+      res.body.items.some((p: { code: string }) => p.code.startsWith('role:')),
+    ).toBe(false);
+    expect(
+      res.body.items.some((p: { code: string }) => p.code === Permissions.PERMISSION_VIEW),
+    ).toBe(true);
   });
 
   it('GET /api/users returns paginated users', async () => {
@@ -101,9 +62,11 @@ describe('Setup / Permissions (e2e)', () => {
 
     expect(res.body.items.length).toBeGreaterThan(0);
     expect(res.body.total).toBeGreaterThan(0);
+    expect(res.body.items[0].roles).toBeUndefined();
   });
 
-  it('POST /api/users creates user', async () => {
+  it('POST /api/users creates user without account permission group', async () => {
+    const company = await ensureTestManagingCompany(app, accessToken);
     const suffix = String(Date.now()).slice(-8);
     const email = `perm${suffix}@example.com`;
     const employee = await request(getHttpServer(app))
@@ -124,24 +87,39 @@ describe('Setup / Permissions (e2e)', () => {
         identityIssuedDate: '2018-01-01',
         identityIssuedPlace: 'Cuc CSQLHC',
         educationLevel: 'UNIVERSITY',
+        managingCompanyId: company.id,
       })
       .expect(201);
     createdEmployeeId = employee.body.id;
 
+    await prisma.employeeProfile.update({
+      where: { id: createdEmployeeId },
+      data: { status: 'INCOMPLETE' },
+    });
+
     const res = await request(getHttpServer(app))
       .post('/api/users')
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({
-        employeeProfileId: createdEmployeeId,
-        roleIds: [roleId],
-      })
+      .send({ employeeProfileId: createdEmployeeId })
       .expect(201);
 
     expect(res.body.email).toBe(email);
     expect(res.body.accountCode).toBe(
       employee.body.profileCode.replace('HS-', 'TK-'),
     );
+    expect(res.body.isSuperAdmin).toBe(false);
+    expect(res.body.permissionGroupId).toBeUndefined();
+    expect(res.body.permissionGroup).toBeUndefined();
+    expect(res.body.roles).toBeUndefined();
     createdUserId = res.body.id;
-  });
 
+    const perms = await request(getHttpServer(app))
+      .get(`/api/users/${createdUserId}/permissions`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(perms.body.isSystemAdmin).toBe(false);
+    expect(Array.isArray(perms.body.effectivePermissionCodes)).toBe(true);
+    expect(perms.body.effectivePermissionCodes).toEqual([]);
+    expect(String(perms.body.note)).toMatch(/vị trí trên cây tổ chức/i);
+  });
 });

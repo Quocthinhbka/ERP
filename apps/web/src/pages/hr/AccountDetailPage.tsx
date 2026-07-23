@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import {
   Button,
@@ -9,9 +9,14 @@ import {
   Space,
   Tag,
   Typography,
+  message,
 } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { getApiErrorMessage } from '../../lib/errors';
+import { queryKeys } from '../../lib/queryKeys';
+import { PageSpinner } from '../../components/PageSpinner';
 
 interface AccountDetail {
   id: string;
@@ -22,7 +27,7 @@ interface AccountDetail {
   linkedEmployeeProfileId: string | null;
   isActive: boolean;
   mustChangePassword: boolean;
-  roles: Array<{ id: string; code: string; name: string }>;
+  isSuperAdmin?: boolean;
 }
 
 interface PermissionItem {
@@ -49,7 +54,6 @@ const MODULE_LABELS: Record<string, string> = {
   setup: 'Thiết lập',
   user: 'Tài khoản',
   hr: 'Nhân sự',
-  role: 'Vai trò',
   permission_group: 'Nhóm quyền',
   organization: 'Tổ chức',
 };
@@ -60,87 +64,59 @@ const SCOPE_TYPE_LABELS: Record<string, string> = {
   unit: 'Đơn vị',
 };
 
+async function fetchAccountDetail(id: string) {
+  const [accountRes, permRes] = await Promise.all([
+    api.get<AccountDetail>(`/users/${id}`),
+    api.get<EffectivePermissions>(`/users/${id}/permissions`).catch(() => ({ data: null })),
+  ]);
+  return { account: accountRes.data, permData: permRes.data };
+}
+
 export function AccountDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [account, setAccount] = useState<AccountDetail | null>(null);
-  const [permData, setPermData] = useState<EffectivePermissions | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  const loadData = async () => {
-    if (!id) return;
-    setLoading(true);
-    try {
-      const [accountRes, permRes] = await Promise.all([
-        api.get<AccountDetail>(`/users/${id}`),
-        api.get<EffectivePermissions>(`/users/${id}/permissions`).catch(() => ({ data: null })),
-      ]);
-      setAccount(accountRes.data);
-      setPermData(permRes.data);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: id ? queryKeys.account(id) : ['accounts', 'missing'],
+    queryFn: () => fetchAccountDetail(id!),
+    enabled: Boolean(id),
+  });
 
   useEffect(() => {
-    loadData();
-  }, [id]);
+    if (isError) {
+      message.error(getApiErrorMessage(error, 'Không tải được thông tin tài khoản'));
+    }
+  }, [isError, error]);
 
-  if (loading || !account) {
-    return null;
+  if (isLoading || !data?.account) {
+    return <PageSpinner />;
   }
 
+  const { account, permData } = data;
   const effectiveCodes = new Set(permData?.effectivePermissionCodes ?? []);
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space direction="vertical" size="middle" style={{ width: '100%' }} data-testid="account-detail-page">
       <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/hr/accounts')}>
         Quay lại
       </Button>
 
       <Card title="Thông tin tài khoản">
-        <Descriptions column={2}>
+        <Descriptions column={1} bordered size="small">
           <Descriptions.Item label="Mã tài khoản">{account.accountCode}</Descriptions.Item>
-          <Descriptions.Item label="SĐT">{account.phone ?? '—'}</Descriptions.Item>
+          <Descriptions.Item label="Họ và tên">{account.fullName}</Descriptions.Item>
           <Descriptions.Item label="Email">{account.email ?? '—'}</Descriptions.Item>
-          <Descriptions.Item label="Họ tên">{account.fullName}</Descriptions.Item>
-          <Descriptions.Item label="Hồ sơ liên kết">
-            {account.linkedEmployeeProfileId ? (
-              <Button
-                type="link"
-                style={{ padding: 0 }}
-                onClick={() =>
-                  navigate(`/hr/employees/${account.linkedEmployeeProfileId}`)
-                }
-              >
-                Xem hồ sơ nhân viên
-              </Button>
-            ) : (
-              <Tag>Chưa có — module HR sẽ bổ sung</Tag>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="Vai trò">
-            {account.roles.map((r) => (
-              <Tag key={r.id}>{r.name}</Tag>
-            ))}
-          </Descriptions.Item>
+          <Descriptions.Item label="Số điện thoại">{account.phone ?? '—'}</Descriptions.Item>
           <Descriptions.Item label="Trạng thái">
-            {account.isActive ? <Tag color="green">Hoạt động</Tag> : <Tag color="red">Khóa</Tag>}
-          </Descriptions.Item>
-          <Descriptions.Item label="Đổi mật khẩu lần đầu">
-            {account.mustChangePassword ? (
-              <Tag color="orange">Đang chờ</Tag>
+            {account.isActive ? (
+              <Tag color="green">Hoạt động</Tag>
             ) : (
-              <Tag color="green">Đã hoàn tất</Tag>
+              <Tag color="red">Khóa</Tag>
             )}
           </Descriptions.Item>
-          {permData && (
-            <Descriptions.Item label="Quản trị hệ thống">
-              {permData.isSystemAdmin ? (
-                <Tag color="blue">Super Admin — toàn quyền</Tag>
-              ) : (
-                <Tag>Không</Tag>
-              )}
+          {account.isSuperAdmin && (
+            <Descriptions.Item label="Vai trò">
+              <Tag color="gold">Super Admin</Tag>
             </Descriptions.Item>
           )}
         </Descriptions>
@@ -152,8 +128,8 @@ export function AccountDetailPage() {
 
           {permData.isSystemAdmin && (
             <Typography.Paragraph>
-              Tài khoản này nhận toàn bộ quyền hệ thống theo mặc định và không thể chỉnh sửa qua vai trò
-              hay vị trí tổ chức.
+              Tài khoản này nhận toàn bộ quyền hệ thống theo mặc định và không thể chỉnh sửa qua vị trí
+              tổ chức.
             </Typography.Paragraph>
           )}
 
@@ -181,14 +157,11 @@ export function AccountDetailPage() {
                 </Typography.Text>
                 <Divider style={{ margin: '8px 0' }} />
                 <Space direction="vertical" style={{ paddingLeft: 8 }}>
-                  {items.map((p) => {
-                    const effective = effectiveCodes.has(p.code);
-                    return (
-                      <Checkbox key={p.id} checked={effective} disabled>
-                        {p.name}
-                      </Checkbox>
-                    );
-                  })}
+                  {items.map((p) => (
+                    <Checkbox key={p.id} checked={effectiveCodes.has(p.code)} disabled>
+                      {p.name}
+                    </Checkbox>
+                  ))}
                 </Space>
               </div>
             );
@@ -196,7 +169,7 @@ export function AccountDetailPage() {
 
           {effectiveCodes.size === 0 && !permData.isSystemAdmin && (
             <Typography.Text type="secondary">
-              Tài khoản chưa có quyền hiệu lực từ vai trò hoặc vị trí trên cây tổ chức.
+              Tài khoản chưa có quyền hiệu lực từ vị trí trên cây tổ chức.
             </Typography.Text>
           )}
         </Card>

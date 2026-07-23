@@ -26,6 +26,7 @@ import {
   ApplyOrganizationImportDto,
   CreateCompanyDto,
   CreateOrganizationUnitDto,
+  ExportOrganizationDto,
   ReorderNodeDto,
   UpdateCompanyDto,
   UpdateOrganizationDto,
@@ -90,9 +91,12 @@ export class OrganizationController {
 
   @Post('export')
   @RequirePermissions(Permissions.ORGANIZATION_VIEW)
-  exportOrganization(@CurrentUser() user: RequestUser) {
+  exportOrganization(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: ExportOrganizationDto,
+  ) {
     this.requireFullOrgAccess(user);
-    return this.organizationIoService.enqueueExport();
+    return this.organizationIoService.enqueueExport(dto.format ?? 'excel');
   }
 
   @Post('import/diff')
@@ -123,12 +127,24 @@ export class OrganizationController {
   @Get('io/jobs/:jobId/download')
   @RequirePermissions(Permissions.ORGANIZATION_VIEW)
   async downloadExport(@Param('jobId') jobId: string, @Res({ passthrough: true }) res: Response) {
-    const { file, fileName } = await this.organizationIoService.downloadExport(jobId);
+    const { file, fileName, contentType } =
+      await this.organizationIoService.downloadExport(jobId);
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${fileName}"`,
     });
     return file;
+  }
+
+  @Get('companies')
+  @RequirePermissions(
+    Permissions.COMPANY_VIEW,
+    Permissions.ORGANIZATION_VIEW,
+    Permissions.HR_EMPLOYEE_CREATE,
+    Permissions.HR_EMPLOYEE_VIEW,
+  )
+  listCompanies() {
+    return this.companiesService.list();
   }
 
   @Post('companies')

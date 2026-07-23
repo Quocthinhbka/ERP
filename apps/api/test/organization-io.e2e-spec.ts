@@ -69,11 +69,23 @@ describe('Organization Import/Export (e2e)', () => {
       ORG_IO_QUEUE_NAME,
       async (job) => {
         if (job.name === ORG_IO_JOB_EXPORT) {
-          return runOrganizationExport(prisma, { storageDir, jobId: String(job.id) });
+          const { format } = job.data as { format?: 'excel' | 'json' };
+          return runOrganizationExport(prisma, {
+            storageDir,
+            jobId: String(job.id),
+            format: format === 'json' ? 'json' : 'excel',
+          });
         }
         if (job.name === ORG_IO_JOB_DIFF) {
-          const { filePath } = job.data as { filePath: string };
-          return runOrganizationDiff(prisma, filePath, { storageDir, jobId: String(job.id) });
+          const { filePath, originalName } = job.data as {
+            filePath: string;
+            originalName?: string;
+          };
+          return runOrganizationDiff(prisma, filePath, {
+            storageDir,
+            jobId: String(job.id),
+            originalName,
+          });
         }
         if (job.name === ORG_IO_JOB_APPLY) {
           const { snapshotPath, selections } = job.data as {
@@ -128,6 +140,47 @@ describe('Organization Import/Export (e2e)', () => {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
     expect(Buffer.isBuffer(download.body) ? download.body.length : 0).toBeGreaterThan(0);
+  });
+
+  it('exports and imports organization JSON via BullMQ', async () => {
+    const enqueue = await request(getHttpServer(app))
+      .post('/api/organization/export')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ format: 'json' })
+      .expect(201);
+
+    const job = await waitJob(app, accessToken, enqueue.body.jobId);
+    expect(job.status).toBe('completed');
+    expect(job.result.fileName).toMatch(/\.json$/);
+
+    const download = await request(getHttpServer(app))
+      .get(`/api/organization/io/jobs/${enqueue.body.jobId}/download`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .buffer(true)
+      .parse((res, callback) => {
+        const data: Buffer[] = [];
+        res.on('data', (chunk) => data.push(chunk as Buffer));
+        res.on('end', () => callback(null, Buffer.concat(data)));
+      })
+      .expect(200);
+
+    expect(download.headers['content-type']).toContain('application/json');
+    const payload = JSON.parse(
+      (Buffer.isBuffer(download.body) ? download.body : Buffer.from('')).toString('utf8'),
+    );
+    expect(payload.version).toBe(1);
+    expect(payload.organization).toBeDefined();
+
+    const diffJob = await request(getHttpServer(app))
+      .post('/api/organization/import/diff')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', download.body, job.result.fileName)
+      .expect(201);
+
+    const completedDiff = await waitJob(app, accessToken, diffJob.body.jobId);
+    expect(completedDiff.status).toBe('completed');
+    expect(completedDiff.result.diff).toBeDefined();
+    expect(completedDiff.result.hasSnapshot).toBe(true);
   });
 
   it('imports excel, returns selectable diff, and restores after apply none', async () => {

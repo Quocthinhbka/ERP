@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  EmployeeWorkPresenceStatus,
   EntityStatus,
   OrgMember,
   OrgNodeType,
@@ -10,6 +11,18 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { PositionPermissionsService } from './position-permissions.service';
 
+const linkedProfileUserSelect = {
+  select: {
+    fullName: true,
+    linkedEmployeeProfile: { select: { workPresenceStatus: true } },
+  },
+} as const;
+
+type LinkedProfileUserRow = {
+  fullName: string;
+  linkedEmployeeProfile: { workPresenceStatus: string } | null;
+} | null;
+
 type UnitRow = {
   id: string;
   companyId: string;
@@ -17,9 +30,10 @@ type UnitRow = {
   name: string;
   managerName: string | null;
   linkedProfileUserId: string | null;
+  positionCode: string | null;
   status: EntityStatus;
   additionalInfo: string | null;
-  linkedProfileUser: { fullName: string } | null;
+  linkedProfileUser: LinkedProfileUserRow;
   members: Array<{
     id: string;
     position: string;
@@ -28,7 +42,8 @@ type UnitRow = {
     email: string | null;
     additionalInfo: string | null;
     linkedProfileUserId: string | null;
-    linkedProfileUser: { fullName: string } | null;
+    positionCode: string | null;
+    linkedProfileUser: LinkedProfileUserRow;
   }>;
   _count: { childUnits: number };
 };
@@ -45,26 +60,26 @@ export class OrganizationTreeService {
     scope?: { isSystemAdmin: boolean; orgScopes: OrgScopeNode[] },
   ) {
     const orgInclude = {
-      linkedProfileUser: { select: { fullName: true } },
+      linkedProfileUser: linkedProfileUserSelect,
       members: {
         orderBy: { sortOrder: 'asc' as const },
-        include: { linkedProfileUser: { select: { fullName: true } } },
+        include: { linkedProfileUser: linkedProfileUserSelect },
       },
       companies: {
         orderBy: [{ sortOrder: 'asc' as const }, { name: 'asc' as const }],
         include: {
-          linkedProfileUser: { select: { fullName: true } },
+          linkedProfileUser: linkedProfileUserSelect,
           members: {
             orderBy: { sortOrder: 'asc' as const },
-            include: { linkedProfileUser: { select: { fullName: true } } },
+            include: { linkedProfileUser: linkedProfileUserSelect },
           },
           units: {
             orderBy: [{ sortOrder: 'asc' as const }, { name: 'asc' as const }],
             include: {
-              linkedProfileUser: { select: { fullName: true } },
+              linkedProfileUser: linkedProfileUserSelect,
               members: {
                 orderBy: { sortOrder: 'asc' as const },
-                include: { linkedProfileUser: { select: { fullName: true } } },
+                include: { linkedProfileUser: linkedProfileUserSelect },
               },
               _count: { select: { childUnits: true } },
             },
@@ -85,8 +100,20 @@ export class OrganizationTreeService {
     const holders: Array<{ holderKind: PositionHolderKind; holderId: string }> = [
       { holderKind: PositionHolderKind.ORGANIZATION_REP, holderId: org.id },
     ];
+    for (const member of org.members) {
+      holders.push({
+        holderKind: PositionHolderKind.ORGANIZATION_MEMBER,
+        holderId: member.id,
+      });
+    }
     for (const company of org.companies) {
       holders.push({ holderKind: PositionHolderKind.COMPANY_REP, holderId: company.id });
+      for (const member of company.members) {
+        holders.push({
+          holderKind: PositionHolderKind.COMPANY_MEMBER,
+          holderId: member.id,
+        });
+      }
       for (const unit of company.units) {
         holders.push({ holderKind: PositionHolderKind.UNIT_MANAGER, holderId: unit.id });
         for (const member of unit.members) {
@@ -107,10 +134,18 @@ export class OrganizationTreeService {
       representativeName: org.representativeName,
       linkedProfileUserId: org.linkedProfileUserId,
       linkedProfileName: org.linkedProfileUser?.fullName ?? null,
+      linkedWorkPresenceStatus: this.mapLinkedWorkPresence(org.linkedProfileUser),
+      positionCode: org.positionCode,
       additionalInfo: org.additionalInfo,
       positionPermission:
         permissionMap.get(`${PositionHolderKind.ORGANIZATION_REP}:${org.id}`) ?? null,
-      members: org.members.map((m) => this.mapLinkedMember(m)),
+      members: org.members.map((m) => ({
+        ...this.mapLinkedMember(m),
+        positionPermission:
+          permissionMap.get(
+            `${PositionHolderKind.ORGANIZATION_MEMBER}:${m.id}`,
+          ) ?? null,
+      })),
       childCount: org.companies.length,
       children: org.companies.map((company) => {
         const unitTree = this.buildUnitTree(
@@ -125,6 +160,8 @@ export class OrganizationTreeService {
           representativeName: company.representativeName,
           linkedProfileUserId: company.linkedProfileUserId,
           linkedProfileName: company.linkedProfileUser?.fullName ?? null,
+          linkedWorkPresenceStatus: this.mapLinkedWorkPresence(company.linkedProfileUser),
+          positionCode: company.positionCode,
           taxId: company.taxId,
           address: company.address,
           phone: company.phone,
@@ -132,7 +169,13 @@ export class OrganizationTreeService {
           status: company.status as EntityStatus,
           positionPermission:
             permissionMap.get(`${PositionHolderKind.COMPANY_REP}:${company.id}`) ?? null,
-          members: company.members.map((m) => this.mapLinkedMember(m)),
+          members: company.members.map((m) => ({
+            ...this.mapLinkedMember(m),
+            positionPermission:
+              permissionMap.get(
+                `${PositionHolderKind.COMPANY_MEMBER}:${m.id}`,
+              ) ?? null,
+          })),
           organizationId: org.id,
           childCount: unitTree.length,
           children: unitTree,
@@ -182,6 +225,8 @@ export class OrganizationTreeService {
           managerName: unit.managerName,
           linkedProfileUserId: unit.linkedProfileUserId,
           linkedProfileName: unit.linkedProfileUser?.fullName ?? null,
+          linkedWorkPresenceStatus: this.mapLinkedWorkPresence(unit.linkedProfileUser),
+          positionCode: unit.positionCode,
           status: unit.status,
           additionalInfo: unit.additionalInfo,
           companyId: unit.companyId,
@@ -192,9 +237,8 @@ export class OrganizationTreeService {
             permissionMap.get(`${PositionHolderKind.UNIT_MANAGER}:${unit.id}`) ?? null,
           members: unit.members.map((m) => ({
             ...this.mapLinkedMember(m),
-            positionPermission: isLeaf
-              ? permissionMap.get(`${PositionHolderKind.UNIT_MEMBER}:${m.id}`) ?? null
-              : null,
+            positionPermission:
+              permissionMap.get(`${PositionHolderKind.UNIT_MEMBER}:${m.id}`) ?? null,
           })),
           children,
         };
@@ -209,7 +253,8 @@ export class OrganizationTreeService {
     email: string | null;
     additionalInfo: string | null;
     linkedProfileUserId?: string | null;
-    linkedProfileUser?: { fullName: string } | null;
+    positionCode?: string | null;
+    linkedProfileUser?: LinkedProfileUserRow;
   }): OrgMember {
     return {
       id: member.id,
@@ -220,7 +265,16 @@ export class OrganizationTreeService {
       additionalInfo: member.additionalInfo,
       linkedProfileUserId: member.linkedProfileUserId ?? null,
       linkedProfileName: member.linkedProfileUser?.fullName ?? null,
+      linkedWorkPresenceStatus: this.mapLinkedWorkPresence(member.linkedProfileUser ?? null),
+      positionCode: member.positionCode ?? null,
     };
+  }
+
+  private mapLinkedWorkPresence(
+    user: LinkedProfileUserRow,
+  ): EmployeeWorkPresenceStatus | null {
+    const status = user?.linkedEmployeeProfile?.workPresenceStatus;
+    return status ? (status as EmployeeWorkPresenceStatus) : null;
   }
 
   private collectMatches(node: OrgTreeNode, search: string | undefined, matchedKeys: Set<string>) {
@@ -233,7 +287,14 @@ export class OrganizationTreeService {
       node.taxId ?? '',
       node.phone ?? '',
       node.email ?? '',
-      ...(node.members?.flatMap((m) => [m.memberName, m.position, m.email ?? '', m.phone ?? '']) ?? []),
+      ...(node.members?.flatMap((m) => [
+        m.memberName,
+        m.position,
+        m.positionCode ?? '',
+        m.email ?? '',
+        m.phone ?? '',
+      ]) ?? []),
+      node.positionCode ?? '',
     ]
       .join(' ')
       .toLowerCase();

@@ -7,6 +7,7 @@ import { PositionHolderKind } from '@erp/shared';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyMemberDto, CreateCompanyDto, UpdateCompanyDto } from './dto/organization.dto';
+import { allocatePositionCode } from './position-code.util';
 import { PositionPermissionsService } from './position-permissions.service';
 
 @Injectable()
@@ -16,10 +17,27 @@ export class CompaniesService {
     private positionPermissions: PositionPermissionsService,
   ) {}
 
+  async list() {
+    return this.prisma.company.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        taxId: true,
+      },
+    });
+  }
+
   async create(dto: CreateCompanyDto) {
     let org = await this.prisma.organization.findFirst();
     if (!org) {
-      org = await this.prisma.organization.create({ data: { name: 'Tổ chức' } });
+      org = await this.prisma.$transaction(async (tx) => {
+        const code = await allocatePositionCode(tx);
+        return tx.organization.create({
+          data: { name: 'Tổ chức', positionCode: code },
+        });
+      });
     }
 
     if (dto.linkedProfileUserId) {
@@ -44,11 +62,12 @@ export class CompaniesService {
           email: dto.email,
           status: dto.status ?? 'ACTIVE',
           sortOrder: (siblingMax._max.sortOrder ?? -1) + 1,
+          positionCode: await allocatePositionCode(tx),
         },
       });
 
       if (dto.members?.length) {
-        await this.createMembers(tx, created.id, dto.members);
+        await this.syncMembers(tx, created.id, dto.members);
       }
 
       if (dto.positionPermission !== undefined) {
@@ -67,7 +86,7 @@ export class CompaniesService {
   }
 
   async update(id: string, dto: UpdateCompanyDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
     if (dto.linkedProfileUserId) {
       await this.ensureUser(dto.linkedProfileUserId);
@@ -85,14 +104,13 @@ export class CompaniesService {
           phone: dto.phone,
           email: dto.email,
           status: dto.status,
+          positionCode:
+            current.positionCode ?? (await allocatePositionCode(tx)),
         },
       });
 
       if (dto.members) {
-        await tx.companyMember.deleteMany({ where: { companyId: id } });
-        if (dto.members.length > 0) {
-          await this.createMembers(tx, id, dto.members);
-        }
+        await this.syncMembers(tx, id, dto.members);
       }
 
       if (dto.positionPermission !== undefined) {
@@ -147,7 +165,10 @@ export class CompaniesService {
   }
 
   async remove(id: string) {
-    const company = await this.prisma.company.findUnique({ where: { id } });
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      include: { members: { select: { id: true } } },
+    });
     if (!company) {
       throw new NotFoundException('Company not found');
     }
@@ -159,7 +180,22 @@ export class CompaniesService {
       throw new BadRequestException('Cannot delete company with organization units');
     }
 
-    await this.positionPermissions.deleteByHolder(PositionHolderKind.COMPANY_REP, id);
+    const employeeCount = await this.prisma.employeeProfile.count({
+      where: { managingCompanyId: id },
+    });
+    if (employeeCount > 0) {
+      throw new BadRequestException(
+        `Không thể xóa công ty đang là chủ quản của ${employeeCount} hồ sơ nhân sự`,
+      );
+    }
+
+    await this.positionPermissions.deleteByHolders([
+      { holderKind: PositionHolderKind.COMPANY_REP, holderId: id },
+      ...company.members.map((m) => ({
+        holderKind: PositionHolderKind.COMPANY_MEMBER,
+        holderId: m.id,
+      })),
+    ]);
     await this.prisma.company.delete({ where: { id } });
     return { success: true };
   }
@@ -182,6 +218,13 @@ export class CompaniesService {
       PositionHolderKind.COMPANY_REP,
       company.id,
     );
+    const memberPermissions =
+      await this.positionPermissions.getManyPositionPermissions(
+        company.members.map((m) => ({
+          holderKind: PositionHolderKind.COMPANY_MEMBER,
+          holderId: m.id,
+        })),
+      );
     return {
       id: company.id,
       organizationId: company.organizationId,
@@ -191,6 +234,7 @@ export class CompaniesService {
       representativeName: company.representativeName,
       linkedProfileUserId: company.linkedProfileUserId,
       linkedProfileName: company.linkedProfileUser?.fullName ?? null,
+      positionCode: company.positionCode,
       phone: company.phone,
       email: company.email,
       status: company.status,
@@ -201,34 +245,87 @@ export class CompaniesService {
         memberName: m.memberName,
         linkedProfileUserId: m.linkedProfileUserId,
         linkedProfileName: m.linkedProfileUser?.fullName ?? null,
+        positionCode: m.positionCode,
         phone: m.phone,
         email: m.email,
         additionalInfo: m.additionalInfo,
+        positionPermission:
+          memberPermissions.get(
+            `${PositionHolderKind.COMPANY_MEMBER}:${m.id}`,
+          ) ?? null,
       })),
     };
   }
 
-  private async createMembers(
+  private async syncMembers(
     tx: Prisma.TransactionClient,
     companyId: string,
     members: CompanyMemberDto[],
   ) {
+    const existing = await tx.companyMember.findMany({
+      where: { companyId },
+      select: { id: true },
+    });
+    const keepIds = new Set(members.map((m) => m.id).filter(Boolean) as string[]);
+    const toDelete = existing.filter((m) => !keepIds.has(m.id));
+
+    if (toDelete.length > 0) {
+      await this.positionPermissions.deleteByHolders(
+        toDelete.map((m) => ({
+          holderKind: PositionHolderKind.COMPANY_MEMBER,
+          holderId: m.id,
+        })),
+        tx,
+      );
+      await tx.companyMember.deleteMany({
+        where: { id: { in: toDelete.map((m) => m.id) } },
+      });
+    }
+
     for (const [index, member] of members.entries()) {
       if (member.linkedProfileUserId) {
         await this.ensureUser(member.linkedProfileUserId);
       }
-      await tx.companyMember.create({
-        data: {
-          companyId,
-          position: member.position,
-          memberName: member.memberName,
-          linkedProfileUserId: member.linkedProfileUserId,
-          phone: member.phone,
-          email: member.email,
-          additionalInfo: member.additionalInfo,
-          sortOrder: index,
-        },
-      });
+
+      let memberId = member.id;
+      if (memberId && keepIds.has(memberId)) {
+        await tx.companyMember.update({
+          where: { id: memberId },
+          data: {
+            position: member.position,
+            memberName: member.memberName,
+            linkedProfileUserId: member.linkedProfileUserId,
+            phone: member.phone,
+            email: member.email,
+            additionalInfo: member.additionalInfo,
+            sortOrder: index,
+          },
+        });
+      } else {
+        const created = await tx.companyMember.create({
+          data: {
+            companyId,
+            position: member.position,
+            memberName: member.memberName,
+            linkedProfileUserId: member.linkedProfileUserId,
+            phone: member.phone,
+            email: member.email,
+            additionalInfo: member.additionalInfo,
+            sortOrder: index,
+            positionCode: await allocatePositionCode(tx),
+          },
+        });
+        memberId = created.id;
+      }
+
+      if (member.positionPermission !== undefined && memberId) {
+        await this.positionPermissions.upsertPositionPermission(
+          PositionHolderKind.COMPANY_MEMBER,
+          memberId,
+          member.positionPermission,
+          tx,
+        );
+      }
     }
   }
 

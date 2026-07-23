@@ -6,13 +6,13 @@ import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
-import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { HealthModule } from './health/health.module';
 import { QueueModule } from './queue/queue.module';
 import { OrganizationModule } from './organization/organization.module';
 import { PermissionGroupsModule } from './permission-groups/permission-groups.module';
 import { EmployeesModule } from './employees/employees.module';
+import { PersonalModule } from './personal/personal.module';
 
 @Module({
   imports: [
@@ -32,13 +32,13 @@ import { EmployeesModule } from './employees/employees.module';
     PrismaModule,
     AuthModule,
     UsersModule,
-    RolesModule,
     PermissionsModule,
     HealthModule,
     QueueModule,
     OrganizationModule,
     PermissionGroupsModule,
     EmployeesModule,
+    PersonalModule,
   ],
   providers: [
     {

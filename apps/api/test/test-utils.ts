@@ -59,3 +59,66 @@ export async function loginAsAdmin(app: INestApplication): Promise<string> {
 
   return res.body.accessToken as string;
 }
+
+/** Đảm bảo có ít nhất 1 nhóm quyền để gán khi tạo tài khoản e2e. */
+export async function ensureTestPermissionGroup(
+  app: INestApplication,
+  accessToken: string,
+): Promise<string> {
+  const list = await request(getHttpServer(app))
+    .get('/api/permission-groups')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .expect(200);
+
+  if (Array.isArray(list.body) && list.body.length > 0) {
+    return list.body[0].id as string;
+  }
+
+  const perms = await request(getHttpServer(app))
+    .get('/api/permissions')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .expect(200);
+  const setupView = (perms.body.items ?? []).find(
+    (p: { code: string }) => p.code === 'setup:view',
+  );
+
+  const created = await request(getHttpServer(app))
+    .post('/api/permission-groups')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({
+      code: `e2e_basic_${Date.now()}`,
+      name: 'E2E Basic',
+      permissionIds: setupView ? [setupView.id] : [],
+    })
+    .expect(201);
+
+  return created.body.id as string;
+}
+
+/** Đảm bảo có công ty ACTIVE để gán làm chủ quản hồ sơ e2e. */
+export async function ensureTestManagingCompany(
+  app: INestApplication,
+  accessToken: string,
+  namePrefix = 'E2E Managing Co',
+): Promise<{ id: string; name: string }> {
+  const list = await request(getHttpServer(app))
+    .get('/api/organization/companies')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .expect(200);
+
+  const active = (list.body as Array<{ id: string; name: string; status: string }>).find(
+    (c) => c.status === 'ACTIVE',
+  );
+  if (active) {
+    return { id: active.id, name: active.name };
+  }
+
+  const created = await request(getHttpServer(app))
+    .post('/api/organization/companies')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({ name: `${namePrefix} ${Date.now()}`, status: 'ACTIVE' })
+    .expect(201);
+
+  return { id: created.body.id as string, name: created.body.name as string };
+}
+

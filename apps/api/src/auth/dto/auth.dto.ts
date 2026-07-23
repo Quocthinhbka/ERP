@@ -36,9 +36,11 @@ export class RefreshTokenDto {
 }
 
 export class ChangePasswordDto {
+  /** Bắt buộc trừ lần đổi mật khẩu đầu tiên (mustChangePassword). */
+  @IsOptional()
   @IsString()
   @MinLength(8)
-  currentPassword!: string;
+  currentPassword?: string;
 
   @IsString()
   @MinLength(8)

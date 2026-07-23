@@ -8,6 +8,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 loadEnvFile(resolve(__dirname, '../../.env'));
 loadEnvFile(resolve(__dirname, '../../.env.local'), true);
 
+const API_PORT = process.env.API_PORT ?? '3000';
+const authFile = 'e2e/.auth/admin.json';
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -21,17 +24,36 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+    },
+    {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: authFile,
+      },
+      dependencies: ['setup'],
+      testIgnore: /login\.spec\.ts/,
+    },
+    {
+      name: 'chromium-login',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: { cookies: [], origins: [] },
+      },
+      testMatch: /login\.spec\.ts/,
+      dependencies: ['setup'],
     },
   ],
   webServer: [
     {
       command: 'pnpm dev:api',
-      url: 'http://localhost:3000/api/health',
+      url: `http://127.0.0.1:${API_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,
       cwd: '../..',
       timeout: 120000,
+      env: { ...process.env, API_PORT },
     },
     {
       command: 'pnpm dev',
@@ -39,6 +61,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       cwd: '.',
       timeout: 60000,
+      env: { ...process.env, API_PORT },
     },
   ],
 });

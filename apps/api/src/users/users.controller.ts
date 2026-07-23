@@ -26,14 +26,19 @@ export class UsersController {
     @Query('page') page = '1',
     @Query('pageSize') pageSize = '20',
     @Query('search') search?: string,
+    @Query('hasLinkedProfile') hasLinkedProfile?: string,
   ) {
     const pageNum = Math.max(Number(page) || 1, 1);
-    const size = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
-    return this.usersService.findAll(pageNum, size, search);
+    const size = Math.min(Math.max(Number(pageSize) || 20, 1), 200);
+    const linkedOnly =
+      hasLinkedProfile === '1' ||
+      hasLinkedProfile === 'true' ||
+      hasLinkedProfile === 'yes';
+    return this.usersService.findAll(pageNum, size, search, linkedOnly);
   }
 
   @Get('available-employee-profiles')
-  @RequirePermissions(Permissions.USER_CREATE)
+  @RequirePermissions(Permissions.USER_CREATE, Permissions.USER_UPDATE)
   findAvailableEmployeeProfiles() {
     return this.usersService.findAvailableEmployeeProfiles();
   }

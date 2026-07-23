@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 import { Form, Typography } from 'antd';
 
 export type FieldMeta = {
@@ -6,6 +7,19 @@ export type FieldMeta = {
   guide: string;
   hint?: string;
 };
+
+type FieldSettingsCtx = {
+  isVisible: (fieldKey: string) => boolean;
+  isRequired: (fieldKey: string) => boolean;
+};
+
+export const EmployeeFieldSettingsContext = createContext<FieldSettingsCtx | null>(
+  null,
+);
+
+export function useEmployeeFieldSettingsContext() {
+  return useContext(EmployeeFieldSettingsContext);
+}
 
 export const EMPLOYEE_FIELDS = {
   fullName: { label: 'Họ và tên', guide: 'Nhập đầy đủ họ tên theo CCCD.', hint: 'NGUYỄN VĂN A' },
@@ -29,7 +43,19 @@ export const EMPLOYEE_FIELDS = {
   partyAdmissionPlace: { label: 'Nơi kết nạp Đảng', guide: 'Chi bộ hoặc tổ chức kết nạp.' },
   rewardDiscipline: { label: 'Khen thưởng / Kỷ luật', guide: 'Có thể nhập nhiều dòng.' },
   strengths: { label: 'Sở trường', guide: 'Mô tả kỹ năng nổi bật.' },
-  status: { label: 'Trạng thái hồ sơ', guide: 'Đang hoạt động hoặc đã khóa.' },
+  employmentStatus: {
+    label: 'Hình thức lao động',
+    guide: 'Hình thức hợp đồng / lao động hiện tại.',
+  },
+  workPresenceStatus: {
+    label: 'Trạng thái làm việc',
+    guide: 'Hiện diện làm việc hiện tại (mặc định Chưa xác định).',
+  },
+  managingCompanyId: {
+    label: 'Công ty chủ quản',
+    guide: 'Công ty quản lý hồ sơ nhân sự (bắt buộc).',
+  },
+  status: { label: 'Trạng thái hồ sơ', guide: 'Trạng thái vòng đời do hệ thống và HR quản lý.' },
 } as const satisfies Record<string, FieldMeta>;
 
 export const FAMILY_MEMBER_FIELDS = {
@@ -65,7 +91,7 @@ export const SECTION_TITLES = {
   work: 'IV. Tóm tắt quá trình công tác',
 } as const;
 
-/** Label + hướng dẫn dưới ô nhập (form sửa/thêm). */
+/** Label (+ hướng dẫn dưới ô nhập nếu không hideGuide). */
 export function GuidedFormItem({
   name,
   meta,
@@ -73,6 +99,7 @@ export function GuidedFormItem({
   children,
   getValueFromEvent,
   rules,
+  hideGuide,
 }: {
   name: string | (string | number)[];
   meta: FieldMeta;
@@ -80,22 +107,33 @@ export function GuidedFormItem({
   children: ReactNode;
   getValueFromEvent?: (event: unknown) => unknown;
   rules?: Array<Record<string, unknown>>;
+  hideGuide?: boolean;
 }) {
+  const settings = useEmployeeFieldSettingsContext();
+  const fieldKey = typeof name === 'string' ? name : null;
+  if (fieldKey && settings && !settings.isVisible(fieldKey)) {
+    return null;
+  }
+  const effectiveRequired =
+    required ?? (fieldKey && settings ? settings.isRequired(fieldKey) : false);
+
   return (
     <Form.Item
       name={name}
       label={meta.label}
-      required={required}
+      required={effectiveRequired}
       rules={
         rules ??
-        (required
+        (effectiveRequired
           ? [{ required: true, message: `Nhập ${meta.label.toLowerCase()}` }]
           : undefined)
       }
       extra={
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {meta.guide}
-        </Typography.Text>
+        hideGuide ? undefined : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {meta.guide}
+          </Typography.Text>
+        )
       }
       getValueFromEvent={getValueFromEvent}
       style={{ marginBottom: 20 }}

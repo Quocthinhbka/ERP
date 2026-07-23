@@ -97,7 +97,7 @@ describe('Permission Groups (e2e)', () => {
     expect(admin.phone).toBe(TEST_ADMIN.phone);
     expect(admin.permissionGroupName).toBeUndefined();
     expect(admin.isSuperAdmin).toBe(true);
-    expect(admin.roles.some((r: { code: string }) => r.code === 'super_admin')).toBe(true);
+    expect(admin.roles).toBeUndefined();
   });
 
   it('rejects demoting or deactivating Super Admin', async () => {
@@ -108,18 +108,6 @@ describe('Permission Groups (e2e)', () => {
     const admin = users.body.items.find(
       (u: { email: string }) => u.email === TEST_ADMIN.email,
     );
-    const userRole = (
-      await request(getHttpServer(app))
-        .get('/api/roles')
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200)
-    ).body.find((r: { code: string }) => r.code === 'user');
-
-    await request(getHttpServer(app))
-      .patch(`/api/users/${admin.id}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ roleIds: [userRole.id] })
-      .expect(400);
 
     await request(getHttpServer(app))
       .patch(`/api/users/${admin.id}`)
@@ -133,18 +121,11 @@ describe('Permission Groups (e2e)', () => {
       .expect(400);
   });
 
-  it('rejects modifying Super Admin role', async () => {
-    const roles = await request(getHttpServer(app))
+  it('GET /api/roles is no longer available', async () => {
+    await request(getHttpServer(app))
       .get('/api/roles')
       .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const superAdmin = roles.body.find((r: { code: string }) => r.code === 'super_admin');
-
-    await request(getHttpServer(app))
-      .patch(`/api/roles/${superAdmin.id}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Hacked Super Admin' })
-      .expect(400);
+      .expect(404);
   });
 
   it('GET /api/users/:id/permissions returns effective permissions from positions/admin', async () => {

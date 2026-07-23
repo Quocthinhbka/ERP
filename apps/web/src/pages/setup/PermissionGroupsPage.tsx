@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Card,
@@ -15,8 +15,11 @@ import {
   message,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Permissions } from '@erp/shared';
 import { api } from '../../lib/api';
+import { getApiErrorMessage } from '../../lib/errors';
+import { queryKeys } from '../../lib/queryKeys';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface PermissionItem {
@@ -58,7 +61,6 @@ const MODULE_LABELS: Record<string, string> = {
   setup: 'Thiết lập',
   user: 'Tài khoản',
   hr: 'Nhân sự',
-  role: 'Vai trò',
   permission_group: 'Nhóm quyền',
   organization: 'Tổ chức',
 };
@@ -80,9 +82,7 @@ function groupPermissionsByModule(items: PermissionItem[]) {
 
 export function PermissionGroupsPage() {
   const { hasPermission } = useAuth();
-  const [groups, setGroups] = useState<PermissionGroupItem[]>([]);
-  const [permissions, setPermissions] = useState<PermissionItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<PermissionGroupItem | null>(null);
   const [permDialogOpen, setPermDialogOpen] = useState(false);
@@ -91,29 +91,87 @@ export function PermissionGroupsPage() {
   const [dialogPermissions, setDialogPermissions] = useState<Record<string, PermissionItem[]>>({});
   const [dialogPositions, setDialogPositions] = useState<PositionItem[]>([]);
   const [form] = Form.useForm();
-  const permissionsByModule = groupPermissionsByModule(permissions);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [groupsRes, permsRes] = await Promise.all([
-        api.get<PermissionGroupItem[]>('/permission-groups'),
-        api.get<{ items: PermissionItem[] }>('/permissions'),
-      ]);
-      setGroups(groupsRes.data);
-      setPermissions(permsRes.data.items);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const {
+    data: groupsData,
+    isLoading: groupsLoading,
+    isError: groupsError,
+    error: groupsErr,
+    refetch: refetchGroups,
+  } = useQuery({
+    queryKey: queryKeys.permissionGroups,
+    queryFn: async () => {
+      const { data } = await api.get<PermissionGroupItem[]>('/permission-groups');
+      return data;
+    },
+  });
+
+  const {
+    data: permissions = [],
+    isError: permsError,
+    error: permsErr,
+  } = useQuery({
+    queryKey: queryKeys.permissionsCatalog,
+    queryFn: async () => {
+      const { data } = await api.get<{ items: PermissionItem[] }>('/permissions');
+      return data.items;
+    },
+  });
+
+  const groups = groupsData ?? [];
+  const loading = groupsLoading;
+  const permissionsByModule = useMemo(
+    () => groupPermissionsByModule(permissions),
+    [permissions],
+  );
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (groupsError) {
+      message.error(getApiErrorMessage(groupsErr, 'Không tải được nhóm quyền'));
+    }
+    if (permsError) {
+      message.error(getApiErrorMessage(permsErr, 'Không tải được danh mục quyền'));
+    }
+  }, [groupsError, groupsErr, permsError, permsErr]);
 
-  const openCreate = () => {
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.permissionGroups });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.permissionsCatalog });
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async (values: { code?: string; name: string; permissionIds: string[] }) => {
+      const payload = { ...values, permissionIds: values.permissionIds ?? [] };
+      if (editingGroup) {
+        await api.patch(`/permission-groups/${editingGroup.id}`, {
+          name: payload.name,
+          permissionIds: payload.permissionIds,
+        });
+      } else {
+        await api.post('/permission-groups', payload);
+      }
+    },
+    onSuccess: () => {
+      message.success(editingGroup ? 'Cập nhật nhóm quyền thành công' : 'Tạo nhóm quyền thành công');
+      setModalOpen(false);
+      invalidate();
+    },
+    onError: (err) => message.error(getApiErrorMessage(err)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (groupId: string) => api.delete(`/permission-groups/${groupId}`),
+    onSuccess: () => {
+      message.success('Đã xóa nhóm quyền');
+      invalidate();
+    },
+    onError: (err) => message.error(getApiErrorMessage(err)),
+  });
+
+  const openCreate = async () => {
     setEditingGroup(null);
     form.resetFields();
+    await refetchGroups();
     setModalOpen(true);
   };
 
@@ -151,32 +209,13 @@ export function PermissionGroupsPage() {
     name: string;
     permissionIds: string[];
   }) => {
-    try {
-      if (editingGroup) {
-        await api.patch(`/permission-groups/${editingGroup.id}`, {
-          name: values.name,
-          permissionIds: values.permissionIds,
-        });
-        message.success('Cập nhật nhóm quyền thành công');
-      } else {
-        await api.post('/permission-groups', values);
-        message.success('Tạo nhóm quyền thành công');
-      }
-      setModalOpen(false);
-      loadData();
-    } catch {
-      message.error('Thao tác thất bại');
-    }
+    await saveMutation.mutateAsync(values);
   };
 
   const handleDelete = (group: PermissionGroupItem) => {
     Modal.confirm({
       title: `Xóa nhóm quyền "${group.name}"?`,
-      onOk: async () => {
-        await api.delete(`/permission-groups/${group.id}`);
-        message.success('Đã xóa nhóm quyền');
-        loadData();
-      },
+      onOk: () => deleteMutation.mutateAsync(group.id),
     });
   };
 
@@ -205,6 +244,7 @@ export function PermissionGroupsPage() {
   return (
     <Card
       title="Nhóm quyền"
+      data-testid="permission-groups-page"
       extra={
         hasPermission(Permissions.PERMISSION_GROUP_CREATE) && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -290,6 +330,7 @@ export function PermissionGroupsPage() {
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
+        confirmLoading={saveMutation.isPending}
         width={640}
         destroyOnHidden
       >

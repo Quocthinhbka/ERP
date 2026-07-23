@@ -2,6 +2,14 @@ import { EntityStatus } from '@erp/shared';
 
 export const ORGANIZATION_IO_VERSION = 1;
 
+export type OrganizationIoFormat = 'excel' | 'json';
+
+export const ORGANIZATION_IO_FORMATS: OrganizationIoFormat[] = ['excel', 'json'];
+
+export function isOrganizationIoFormat(value: unknown): value is OrganizationIoFormat {
+  return value === 'excel' || value === 'json';
+}
+
 export const ORG_IO_SHEETS = {
   ORGANIZATION: 'Organization',
   ORGANIZATION_MEMBERS: 'OrganizationMembers',

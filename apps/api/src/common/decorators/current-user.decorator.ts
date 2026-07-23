@@ -5,6 +5,7 @@ export interface RequestUser {
   id: string;
   email: string | null;
   fullName: string;
+  linkedEmployeeProfileId: string | null;
   mustChangePassword: boolean;
   permissions: PermissionCode[];
   isSystemAdmin: boolean;

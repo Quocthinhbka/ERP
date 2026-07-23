@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Modal,
+  Radio,
   Space,
   Table,
   Tag,
@@ -17,6 +18,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { api } from '../../lib/api';
 
 type DiffKind = 'new' | 'changed' | 'unchanged' | 'missing_in_file';
+type IoFormat = 'excel' | 'json';
 
 interface DiffChangeItem {
   selectionKey: string;
@@ -92,6 +94,12 @@ function rowStyle(kind: DiffKind): React.CSSProperties {
   }
 }
 
+function downloadMime(fileName: string) {
+  return fileName.toLowerCase().endsWith('.json')
+    ? 'application/json'
+    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+}
+
 interface Props {
   canExport: boolean;
   canImport: boolean;
@@ -100,6 +108,8 @@ interface Props {
 
 export function OrganizationIoActions({ canExport, canImport, onApplied }: Props) {
   const [diffOpen, setDiffOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState<'export' | 'import' | null>(null);
+  const [format, setFormat] = useState<IoFormat>('excel');
   const [loading, setLoading] = useState(false);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [snapshotJobId, setSnapshotJobId] = useState<string | null>(null);
@@ -111,27 +121,28 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
     [diff],
   );
 
-  const handleExport = async () => {
+  const handleExport = async (selectedFormat: IoFormat) => {
     setLoading(true);
     try {
-      const { data } = await api.post<{ jobId: string }>('/organization/export');
+      const { data } = await api.post<{ jobId: string }>('/organization/export', {
+        format: selectedFormat,
+      });
       const job = await waitForJob(data.jobId);
       if (job.status !== 'completed') {
         throw new Error(job.failedReason || 'Export thất bại');
       }
+      const fileName = job.result?.fileName ?? `organization-export.${selectedFormat === 'json' ? 'json' : 'xlsx'}`;
       const response = await api.get(`/organization/io/jobs/${data.jobId}/download`, {
         responseType: 'blob',
       });
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
+      const blob = new Blob([response.data], { type: downloadMime(fileName) });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = job.result?.fileName ?? 'organization-export.xlsx';
+      a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
-      message.success('Đã export Excel');
+      message.success(`Đã export ${selectedFormat === 'json' ? 'JSON' : 'Excel'}`);
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Export thất bại');
     } finally {
@@ -140,6 +151,11 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
   };
 
   const handleImportFile = async (file: File) => {
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.xlsx') && !lower.endsWith('.json')) {
+      message.error('Chỉ hỗ trợ file .xlsx hoặc .json');
+      return false;
+    }
     setLoading(true);
     try {
       const formData = new FormData();
@@ -199,6 +215,19 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
     }
   };
 
+  const confirmFormat = async () => {
+    const mode = formatOpen;
+    setFormatOpen(null);
+    if (mode === 'export') {
+      await handleExport(format);
+      return;
+    }
+    if (mode === 'import' && fileInputRef.current) {
+      fileInputRef.current.accept = format === 'json' ? '.json,application/json' : '.xlsx';
+      fileInputRef.current.click();
+    }
+  };
+
   const columns: ColumnsType<DiffChangeItem> = [
     {
       title: 'Loại',
@@ -230,8 +259,15 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
   return (
     <>
       {canExport && (
-        <Button icon={<DownloadOutlined />} loading={loading} onClick={handleExport}>
-          Export Excel
+        <Button
+          icon={<DownloadOutlined />}
+          loading={loading}
+          onClick={() => {
+            setFormat('excel');
+            setFormatOpen('export');
+          }}
+        >
+          Export
         </Button>
       )}
       {canImport && (
@@ -239,7 +275,7 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx"
+            accept=".xlsx,.json"
             style={{ display: 'none' }}
             onChange={async (e) => {
               const file = e.target.files?.[0];
@@ -250,12 +286,35 @@ export function OrganizationIoActions({ canExport, canImport, onApplied }: Props
           <Button
             icon={<UploadOutlined />}
             loading={loading}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              setFormat('excel');
+              setFormatOpen('import');
+            }}
           >
-            Import Excel
+            Import
           </Button>
         </>
       )}
+
+      <Modal
+        title={formatOpen === 'import' ? 'Chọn định dạng Import' : 'Chọn định dạng Export'}
+        open={formatOpen !== null}
+        onCancel={() => setFormatOpen(null)}
+        onOk={confirmFormat}
+        okText="Tiếp tục"
+        cancelText="Hủy"
+        confirmLoading={loading}
+        destroyOnClose
+      >
+        <Radio.Group
+          value={format}
+          onChange={(e) => setFormat(e.target.value as IoFormat)}
+          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        >
+          <Radio value="excel">Excel (.xlsx)</Radio>
+          <Radio value="json">JSON (.json)</Radio>
+        </Radio.Group>
+      </Modal>
 
       <Modal
         title="So sánh Import Tổ chức"

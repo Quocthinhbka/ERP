@@ -2,7 +2,9 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import {
   OrgNodeType,
@@ -10,7 +12,6 @@ import {
   PermissionCode,
   PositionHolderKind,
   PositionPermissionSummary,
-  SystemRole,
   ALL_PERMISSIONS,
   hasOrgScopeAccess,
   orgScopeKey,
@@ -28,14 +29,95 @@ export interface PositionPermissionInput {
 
 const versionInclude = {
   permissions: { include: { permission: true } },
-  permissionGroup: {
-    include: { permissions: { include: { permission: true } } },
-  },
 } as const;
 
 @Injectable()
-export class PositionPermissionsService {
+export class PositionPermissionsService implements OnModuleInit {
+  private readonly logger = new Logger(PositionPermissionsService.name);
+
   constructor(private prisma: PrismaService) {}
+
+  async onModuleInit() {
+    try {
+      const removed = await this.reconcileOrphans();
+      if (removed > 0) {
+        this.logger.warn(`Removed ${removed} orphan position permission(s)`);
+      }
+    } catch (error) {
+      this.logger.error('Failed to reconcile orphan position permissions', error as Error);
+    }
+  }
+
+  /**
+   * Xoá các PositionPermission có holder (polymorphic) không còn tồn tại.
+   * Bù cho việc holderId không có FK thật.
+   */
+  async reconcileOrphans(): Promise<number> {
+    const rows = await this.prisma.positionPermission.findMany({
+      select: { id: true, holderKind: true, holderId: true },
+    });
+    if (rows.length === 0) return 0;
+
+    const idsByKind = new Map<PositionHolderKind, Set<string>>();
+    for (const row of rows) {
+      const set = idsByKind.get(row.holderKind) ?? new Set<string>();
+      set.add(row.holderId);
+      idsByKind.set(row.holderKind, set);
+    }
+
+    const existingByKind = async (
+      kind: PositionHolderKind,
+      ids: string[],
+    ): Promise<Set<string>> => {
+      const where = { id: { in: ids } } as const;
+      const select = { id: true } as const;
+      switch (kind) {
+        case PositionHolderKind.ORGANIZATION_REP:
+          return new Set(
+            (await this.prisma.organization.findMany({ where, select })).map((r) => r.id),
+          );
+        case PositionHolderKind.COMPANY_REP:
+          return new Set(
+            (await this.prisma.company.findMany({ where, select })).map((r) => r.id),
+          );
+        case PositionHolderKind.UNIT_MANAGER:
+          return new Set(
+            (await this.prisma.organizationUnit.findMany({ where, select })).map((r) => r.id),
+          );
+        case PositionHolderKind.UNIT_MEMBER:
+          return new Set(
+            (await this.prisma.organizationUnitMember.findMany({ where, select })).map(
+              (r) => r.id,
+            ),
+          );
+        case PositionHolderKind.ORGANIZATION_MEMBER:
+          return new Set(
+            (await this.prisma.organizationMember.findMany({ where, select })).map((r) => r.id),
+          );
+        case PositionHolderKind.COMPANY_MEMBER:
+          return new Set(
+            (await this.prisma.companyMember.findMany({ where, select })).map((r) => r.id),
+          );
+      }
+    };
+
+    const orphanIds: string[] = [];
+    for (const [kind, idSet] of idsByKind) {
+      const ids = [...idSet];
+      const existing = await existingByKind(kind, ids);
+      for (const row of rows) {
+        if (row.holderKind === kind && !existing.has(row.holderId)) {
+          orphanIds.push(row.id);
+        }
+      }
+    }
+
+    if (orphanIds.length === 0) return 0;
+    await this.prisma.positionPermission.deleteMany({
+      where: { id: { in: orphanIds } },
+    });
+    return orphanIds.length;
+  }
 
   async resolveAuthContext(userId: string): Promise<{
     permissions: PermissionCode[];
@@ -44,25 +126,12 @@ export class PositionPermissionsService {
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        roles: {
-          include: {
-            role: {
-              include: {
-                permissions: { include: { permission: true } },
-              },
-            },
-          },
-        },
-      },
     });
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    const isSystemAdmin = user.roles.some(
-      (r) => r.role.code === SystemRole.SUPER_ADMIN,
-    );
+    const isSystemAdmin = user.isSuperAdmin;
     if (isSystemAdmin) {
       return {
         permissions: [...ALL_PERMISSIONS],
@@ -71,17 +140,14 @@ export class PositionPermissionsService {
       };
     }
 
+    // Quyền hiệu lực chỉ từ nhóm quyền gắn vị trí trên cây tổ chức.
+    // Tài khoản / hồ sơ nhân viên không phải nguồn quyền (trừ Super Admin).
     const codes = new Set<PermissionCode>();
-    for (const userRole of user.roles) {
-      for (const rolePermission of userRole.role.permissions) {
-        codes.add(rolePermission.permission.code as PermissionCode);
-      }
-    }
 
     const holders = await this.findHoldersForUser(userId);
     if (holders.length === 0) {
       return {
-        permissions: Array.from(codes),
+        permissions: [],
         isSystemAdmin: false,
         orgScopes: [],
       };
@@ -201,7 +267,19 @@ export class PositionPermissionsService {
     }
 
     if (holderKind === PositionHolderKind.UNIT_MEMBER) {
-      await this.assertUnitMemberIsLeaf(holderId, db);
+      await this.assertUnitMemberExists(holderId, db);
+    }
+    if (holderKind === PositionHolderKind.ORGANIZATION_MEMBER) {
+      const member = await db.organizationMember.findUnique({
+        where: { id: holderId },
+      });
+      if (!member) throw new NotFoundException('Organization member not found');
+    }
+    if (holderKind === PositionHolderKind.COMPANY_MEMBER) {
+      const member = await db.companyMember.findUnique({
+        where: { id: holderId },
+      });
+      if (!member) throw new NotFoundException('Company member not found');
     }
 
     const versionId = await this.resolveVersionId(input, db);
@@ -308,8 +386,9 @@ export class PositionPermissionsService {
     if (isSystemAdmin) {
       return tree;
     }
+    // Chưa gắn vị trí (orgScopes rỗng) → không giới hạn phạm vi.
     if (orgScopes.length === 0) {
-      return null;
+      return tree;
     }
 
     const grantKeys = new Set(orgScopes.map((s) => orgScopeKey(s.type, s.id)));
@@ -380,24 +459,33 @@ export class PositionPermissionsService {
       selfNode: OrgScopeNode;
     }>
   > {
-    const [orgs, companies, units, unitMembers] = await Promise.all([
-      this.prisma.organization.findMany({
-        where: { linkedProfileUserId: userId },
-        select: { id: true },
-      }),
-      this.prisma.company.findMany({
-        where: { linkedProfileUserId: userId },
-        select: { id: true },
-      }),
-      this.prisma.organizationUnit.findMany({
-        where: { linkedProfileUserId: userId },
-        select: { id: true },
-      }),
-      this.prisma.organizationUnitMember.findMany({
-        where: { linkedProfileUserId: userId },
-        select: { id: true, unitId: true },
-      }),
-    ]);
+    const [orgs, companies, units, unitMembers, orgMembers, companyMembers] =
+      await Promise.all([
+        this.prisma.organization.findMany({
+          where: { linkedProfileUserId: userId },
+          select: { id: true },
+        }),
+        this.prisma.company.findMany({
+          where: { linkedProfileUserId: userId },
+          select: { id: true },
+        }),
+        this.prisma.organizationUnit.findMany({
+          where: { linkedProfileUserId: userId },
+          select: { id: true },
+        }),
+        this.prisma.organizationUnitMember.findMany({
+          where: { linkedProfileUserId: userId },
+          select: { id: true, unitId: true },
+        }),
+        this.prisma.organizationMember.findMany({
+          where: { linkedProfileUserId: userId },
+          select: { id: true, organizationId: true },
+        }),
+        this.prisma.companyMember.findMany({
+          where: { linkedProfileUserId: userId },
+          select: { id: true, companyId: true },
+        }),
+      ]);
 
     return [
       ...orgs.map((o) => ({
@@ -420,33 +508,29 @@ export class PositionPermissionsService {
         holderId: m.id,
         selfNode: { type: OrgNodeType.UNIT, id: m.unitId },
       })),
+      ...orgMembers.map((m) => ({
+        holderKind: PositionHolderKind.ORGANIZATION_MEMBER,
+        holderId: m.id,
+        selfNode: { type: OrgNodeType.ORGANIZATION, id: m.organizationId },
+      })),
+      ...companyMembers.map((m) => ({
+        holderKind: PositionHolderKind.COMPANY_MEMBER,
+        holderId: m.id,
+        selfNode: { type: OrgNodeType.COMPANY, id: m.companyId },
+      })),
     ];
   }
 
   private codesFromVersion(version: {
-    versionNumber: number;
     permissions: Array<{ permission: { code: string } }>;
-    permissionGroup: {
-      permissions: Array<{ permission: { code: string } }>;
-    };
   }): PermissionCode[] {
-    const list =
-      version.versionNumber === 0
-        ? version.permissionGroup.permissions
-        : version.permissions;
-    return list.map((p) => p.permission.code as PermissionCode);
+    return version.permissions.map((p) => p.permission.code as PermissionCode);
   }
 
   private permissionIdsFromVersion(version: {
-    versionNumber: number;
     permissions: Array<{ permissionId: string }>;
-    permissionGroup: {
-      permissions: Array<{ permissionId: string }>;
-    };
   }): string[] {
-    return version.versionNumber === 0
-      ? version.permissionGroup.permissions.map((p) => p.permissionId)
-      : version.permissions.map((p) => p.permissionId);
+    return version.permissions.map((p) => p.permissionId);
   }
 
   private toSummary(pp: {
@@ -460,9 +544,6 @@ export class PositionPermissionsService {
       permissionGroupId: string;
       versionNumber: number;
       permissions: Array<{ permissionId: string; permission: { code: string } }>;
-      permissionGroup: {
-        permissions: Array<{ permissionId: string; permission: { code: string } }>;
-      };
     };
   }): PositionPermissionSummary {
     return {
@@ -589,21 +670,15 @@ export class PositionPermissionsService {
     return created.id;
   }
 
-  private async assertUnitMemberIsLeaf(
+  private async assertUnitMemberExists(
     unitMemberId: string,
     db: Prisma.TransactionClient | PrismaService,
   ) {
     const member = await db.organizationUnitMember.findUnique({
       where: { id: unitMemberId },
-      include: { unit: { include: { _count: { select: { childUnits: true } } } } },
     });
     if (!member) {
       throw new NotFoundException('Unit member not found');
-    }
-    if (member.unit._count.childUnits > 0) {
-      throw new BadRequestException(
-        'Permissions can only be assigned to positions on leaf units',
-      );
     }
   }
 
@@ -652,6 +727,21 @@ export class PositionPermissionsService {
       });
       if (!member) throw new NotFoundException('Unit member not found');
       return this.unitAncestorScopes(member.unitId, db);
+    }
+
+    if (holderKind === PositionHolderKind.ORGANIZATION_MEMBER) {
+      return [];
+    }
+
+    if (holderKind === PositionHolderKind.COMPANY_MEMBER) {
+      const member = await db.companyMember.findUnique({
+        where: { id: holderId },
+        include: { company: true },
+      });
+      if (!member) throw new NotFoundException('Company member not found');
+      return [
+        { type: OrgNodeType.ORGANIZATION, id: member.company.organizationId },
+      ];
     }
 
     return [];
@@ -730,6 +820,30 @@ export class PositionPermissionsService {
             : holderId,
           nodeType: OrgNodeType.UNIT,
           nodeId: member?.unitId ?? holderId,
+        };
+      }
+      case PositionHolderKind.ORGANIZATION_MEMBER: {
+        const member = await this.prisma.organizationMember.findUnique({
+          where: { id: holderId },
+        });
+        return {
+          label: member
+            ? `${member.position}: ${member.memberName}`
+            : holderId,
+          nodeType: OrgNodeType.ORGANIZATION,
+          nodeId: member?.organizationId ?? holderId,
+        };
+      }
+      case PositionHolderKind.COMPANY_MEMBER: {
+        const member = await this.prisma.companyMember.findUnique({
+          where: { id: holderId },
+        });
+        return {
+          label: member
+            ? `${member.position}: ${member.memberName}`
+            : holderId,
+          nodeType: OrgNodeType.COMPANY,
+          nodeId: member?.companyId ?? holderId,
         };
       }
     }

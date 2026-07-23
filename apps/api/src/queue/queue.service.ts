@@ -7,14 +7,23 @@ import {
   ORG_IO_JOB_DIFF,
   ORG_IO_JOB_EXPORT,
   ORG_IO_QUEUE_NAME,
-  type ApplySelection,
+  type ApplySelection as OrgApplySelection,
   type OrganizationIoJobResult,
 } from '@erp/organization-io';
+import {
+  EMP_IO_JOB_APPLY,
+  EMP_IO_JOB_DIFF,
+  EMP_IO_JOB_EXPORT,
+  EMP_IO_QUEUE_NAME,
+  type ApplySelection as EmpApplySelection,
+  type EmployeeIoJobResult,
+} from '@erp/employee-io';
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   private connection: Redis;
   private orgIoQueue: Queue;
+  private empIoQueue: Queue;
 
   constructor(config: ConfigService) {
     const password = config.get<string>('REDIS_PASSWORD');
@@ -28,12 +37,15 @@ export class QueueService implements OnModuleDestroy {
     this.orgIoQueue = new Queue(ORG_IO_QUEUE_NAME, {
       connection: this.connection,
     });
+    this.empIoQueue = new Queue(EMP_IO_QUEUE_NAME, {
+      connection: this.connection,
+    });
   }
 
-  async enqueueOrganizationExport() {
+  async enqueueOrganizationExport(format: 'excel' | 'json' = 'excel') {
     const job = await this.orgIoQueue.add(
       ORG_IO_JOB_EXPORT,
-      { enqueuedAt: new Date().toISOString() },
+      { format, enqueuedAt: new Date().toISOString() },
       { removeOnComplete: 50, removeOnFail: 50 },
     );
     return { jobId: job.id, queue: ORG_IO_QUEUE_NAME, status: 'queued' as const };
@@ -48,7 +60,10 @@ export class QueueService implements OnModuleDestroy {
     return { jobId: job.id, queue: ORG_IO_QUEUE_NAME, status: 'queued' as const };
   }
 
-  async enqueueOrganizationApply(snapshotPath: string, selections: ApplySelection[]) {
+  async enqueueOrganizationApply(
+    snapshotPath: string,
+    selections: OrgApplySelection[],
+  ) {
     const job = await this.orgIoQueue.add(
       ORG_IO_JOB_APPLY,
       { snapshotPath, selections, enqueuedAt: new Date().toISOString() },
@@ -60,12 +75,72 @@ export class QueueService implements OnModuleDestroy {
   async getOrganizationIoJob(jobId: string) {
     const job = await this.orgIoQueue.getJob(jobId);
     if (!job) return null;
-    return this.mapJob(job);
+    return this.mapJob<OrganizationIoJobResult>(job);
   }
 
-  private async mapJob(job: Job) {
+  async enqueueEmployeeExport(
+    requestedByUserId: string,
+    options?: { template?: boolean; format?: 'excel' | 'json' },
+  ) {
+    const job = await this.empIoQueue.add(
+      EMP_IO_JOB_EXPORT,
+      {
+        template: options?.template ?? false,
+        format: options?.format ?? 'excel',
+        requestedByUserId,
+        enqueuedAt: new Date().toISOString(),
+      },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { jobId: job.id, queue: EMP_IO_QUEUE_NAME, status: 'queued' as const };
+  }
+
+  async enqueueEmployeeDiff(
+    filePath: string,
+    originalName: string,
+    requestedByUserId: string,
+  ) {
+    const job = await this.empIoQueue.add(
+      EMP_IO_JOB_DIFF,
+      {
+        filePath,
+        originalName,
+        requestedByUserId,
+        enqueuedAt: new Date().toISOString(),
+      },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { jobId: job.id, queue: EMP_IO_QUEUE_NAME, status: 'queued' as const };
+  }
+
+  async enqueueEmployeeApply(
+    snapshotPath: string,
+    selections: EmpApplySelection[],
+    requestedByUserId: string,
+  ) {
+    const job = await this.empIoQueue.add(
+      EMP_IO_JOB_APPLY,
+      {
+        snapshotPath,
+        selections,
+        requestedByUserId,
+        enqueuedAt: new Date().toISOString(),
+      },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { jobId: job.id, queue: EMP_IO_QUEUE_NAME, status: 'queued' as const };
+  }
+
+  async getEmployeeIoJob(jobId: string) {
+    const job = await this.empIoQueue.getJob(jobId);
+    if (!job) return null;
+    return this.mapJob<EmployeeIoJobResult>(job);
+  }
+
+  private async mapJob<T>(job: Job) {
     const state = await job.getState();
-    const result = job.returnvalue as OrganizationIoJobResult | undefined;
+    const result = job.returnvalue as T | undefined;
+    const data = job.data as { requestedByUserId?: string };
     return {
       jobId: job.id,
       name: job.name,
@@ -73,11 +148,13 @@ export class QueueService implements OnModuleDestroy {
       progress: job.progress,
       result: result ?? null,
       failedReason: job.failedReason ?? null,
+      requestedByUserId: data?.requestedByUserId ?? null,
     };
   }
 
   async onModuleDestroy() {
     await this.orgIoQueue.close();
+    await this.empIoQueue.close();
     await this.connection.quit();
   }
 }

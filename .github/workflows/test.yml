@@ -76,6 +76,7 @@ jobs:
         run: |
           pnpm --filter @erp/shared build
           pnpm --filter @erp/organization-io build
+          pnpm --filter @erp/employee-io build
 
       - name: Apply database migrations
         run: pnpm exec prisma migrate deploy

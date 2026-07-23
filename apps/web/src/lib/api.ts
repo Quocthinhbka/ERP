@@ -6,6 +6,9 @@ const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\
 /** Access token trong memory (không localStorage) — bổ sung cho cookie HttpOnly. */
 let memoryAccessToken: string | null = null;
 
+/** Hàng đợi refresh — tránh gọi /auth/refresh song song khi nhiều request 401. */
+let refreshPromise: Promise<string | null> | null = null;
+
 export function setMemoryAccessToken(token: string | null) {
   memoryAccessToken = token;
 }
@@ -27,6 +30,28 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post<{ accessToken: string }>(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
+      .then(({ data }) => {
+        if (data.accessToken) {
+          setMemoryAccessToken(data.accessToken);
+          return data.accessToken;
+        }
+        return null;
+      })
+      .catch(() => {
+        setMemoryAccessToken(null);
+        return null;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -44,22 +69,13 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !original._retry && !isAuthEndpoint) {
       original._retry = true;
-      try {
-        const { data } = await axios.post<{ accessToken: string }>(
-          `${API_URL}/api/auth/refresh`,
-          {},
-          { withCredentials: true },
-        );
-        if (data.accessToken) {
-          setMemoryAccessToken(data.accessToken);
-          original.headers.Authorization = `Bearer ${data.accessToken}`;
-        }
+      const token = await refreshAccessToken();
+      if (token) {
+        original.headers.Authorization = `Bearer ${token}`;
         return api(original);
-      } catch {
-        setMemoryAccessToken(null);
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
+      }
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);
